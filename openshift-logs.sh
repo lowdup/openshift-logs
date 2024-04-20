@@ -45,7 +45,7 @@ select_cluster() {
         local SERVER_URL="${cluster_info[0]}"
         local TOKEN="${cluster_info[1]}"
 
-        if [[ -z "$TOKEN" || ! oc_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true" ]]; then
+        if [[ -z "$TOKEN" ]] || ! oc_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
             echo_color "Авторизация по токену не удалась или токен отсутствует. Попробуйте логин и пароль."
             read -rp "Введите ваш логин: " username
             read -rsp "Введите ваш пароль: " password
@@ -68,6 +68,7 @@ select_cluster() {
         fi
     fi
 }
+
 
 select_namespace() {
     echo_color "Доступные проекты:"
