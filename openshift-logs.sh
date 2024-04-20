@@ -26,12 +26,21 @@ execute_command() {
 login_to_cluster() {
     SERVER_URL=$1
     TOKEN=$2
+    local line_number=$3
     if ! execute_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
         echo_color "Авторизация по токену не удалась. Попробуем логин и пароль."
         read -rp "Введите ваш логин: " username
         read -rsp "Введите ваш пароль: " password
         echo
-        if ! execute_command "oc login -u '$username' -p '$password' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
+        if execute_command "oc login -u '$username' -p '$password' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
+            # Получение нового токена после успешного входа
+            new_token=$(oc whoami -t)
+            if [ -n "$new_token" ]; then
+                # Обновление файла конфигурации с новым токеном
+                sed -i "${line_number}s| .*| $new_token|" "$CONFIG_FILE"
+                echo_color "Токен успешно обновлен в конфигурационном файле."
+            fi
+        else
             echo_color "Авторизация не удалась. Проверьте логин и пароль и попробуйте снова."
             exit 1
         fi
