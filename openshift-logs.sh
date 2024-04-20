@@ -77,28 +77,41 @@ select_cluster() {
 # Функция для выбора namespace, используя доступные проекты
 select_namespace() {
     echo_color "Доступные проекты:"
-    # Получаем список доступных проектов и обрабатываем его
-    oc projects 2>>$ERROR_LOG | sed '1,2d' | sed '$d' | sed '$d' | sed 's/^  \* //' > available_projects.txt
-    if [ ! -s available_projects.txt ]; then
-        echo_color "Ошибка: Не удалось получить список проектов или список проектов пуст. Проверьте $ERROR_LOG для подробностей."
+    # Получаем и обрабатываем список доступных проектов, сохраняем в переменную
+    local projects
+    if ! projects=$(oc projects 2>>$ERROR_LOG | sed '1,2d' | sed '$d' | sed '$d' | sed 's/^[[:space:]]*\*?[[:space:]]*//'); then
+        echo_color "Ошибка при получении списка проектов. Смотрите $ERROR_LOG для подробностей."
         exit 1
     fi
-    cat available_projects.txt | nl -w1 -s') '
+    
+    if [ -z "$projects" ]; then
+        echo_color "Ошибка: Не найдено проектов. Проверьте доступность и права доступа."
+        exit 1
+    fi
+
+    # Выводим список проектов с номерами
+    local IFS=$'\n'
+    local i=1
+    for project in $projects; do
+        echo "$i) $project"
+        i=$((i+1))
+    done
 
     echo "Введите номер проекта или 0 для выбора всех доступных проектов:"
     read -rp "Ваш выбор: " project_choice
 
     if [[ "$project_choice" == "0" ]]; then
-        NAMESPACES=$(cat available_projects.txt)
+        NAMESPACES=($projects)
     else
-        NAMESPACES=$(awk "NR==$project_choice {print \$1}" available_projects.txt)
+        local project_names=($projects)
+        NAMESPACES=${project_names[$((project_choice - 1))]}
         if [ -z "$NAMESPACES" ]; then
             echo_color "Неверный выбор проекта. Попробуйте снова."
             select_namespace
         fi
     fi
-    rm available_projects.txt
 }
+
 
 
 # Функция для запроса временного интервала логов
