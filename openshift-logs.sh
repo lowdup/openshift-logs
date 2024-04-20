@@ -15,11 +15,14 @@ echo_color() {
 # Функция для выполнения команд с учетом режима отладки
 execute_command() {
     if [ "$DEBUG" -eq 1 ]; then
-        eval "$@"  # Выполнение с выводом в консоль
+        echo "Executing command with output: $@"
+        eval "$@"  # Execute with output to console
     else
-        eval "$@" &>>$ERROR_LOG  # Перенаправление всех выводов в файл лога ошибок
+        echo "Executing command without output: $@"
+        eval "$@" 2>>$ERROR_LOG  # Redirect only stderr to the error log
     fi
 }
+
 
 # Функция для входа в кластер и обновления токена
 login_to_cluster() {
@@ -149,10 +152,15 @@ fetch_logs() {
 
         request_log_time  # Запрашиваем временной интервал после выбора подов
         for pod in "${selected_pods[@]}"; do
-            echo "Загружаем список контейнеров в поде $pod..."
+            echo "Fetching container list for pod $pod in namespace $ns..."
             local containers
             if ! containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'"); then
-                echo_color "Ошибка при получении списка контейнеров. Смотрите $ERROR_LOG для подробностей."
+                echo_color "Error retrieving container list. Check $ERROR_LOG for details."
+                continue
+            fi
+
+            if [ -z "$containers" ]; then
+                echo_color "No containers found in pod $pod. Please check the pod status and permissions."
                 continue
             fi
 
@@ -160,10 +168,11 @@ fetch_logs() {
                 local timestamp=$(date "+%Y%m%d-%H%M%S")
                 local log_path="./logs/$ns/$pod/$container-$timestamp.log"
                 mkdir -p "$(dirname "$log_path")"
+                echo "Saving logs for container $container in pod $pod..."
                 if ! execute_command "oc logs $pod -c $container -n $ns --timestamps $SINCE_TIME" > "$log_path"; then
-                    echo_color "Ошибка при загрузке логов для контейнера $container. Смотрите $ERROR_LOG для подробностей."
+                    echo_color "Error downloading logs for container $container. Check $ERROR_LOG for details."
                 else
-                    echo_color "Логи сохранены: $log_path"
+                    echo_color "Logs saved: $log_path"
                 fi
             done
         done
