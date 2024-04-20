@@ -2,6 +2,8 @@
 
 # Путь к файлу конфигурации кластеров
 CONFIG_FILE="clusters.conf"
+# Путь к файлу лога ошибок
+ERROR_LOG="error_log.txt"
 
 # Функция для печати с цветом
 echo_color() {
@@ -12,12 +14,12 @@ echo_color() {
 login_to_cluster() {
     SERVER_URL=$1
     TOKEN=$2
-    if ! oc login --token="$TOKEN" --server="$SERVER_URL" --insecure-skip-tls-verify=true; then
+    if ! oc login --token="$TOKEN" --server="$SERVER_URL" --insecure-skip-tls-verify=true > /dev/null 2>>$ERROR_LOG; then
         echo_color "Авторизация по токену не удалась. Попробуем логин и пароль."
         read -rp "Введите ваш логин: " username
         read -rsp "Введите ваш пароль: " password
         echo
-        if ! oc login -u "$username" -p "$password" --server="$SERVER_URL" --insecure-skip-tls-verify=true; then
+        if ! oc login -u "$username" -p "$password" --server="$SERVER_URL" --insecure-skip-tls-verify=true > /dev/null 2>>$ERROR_LOG; then
             echo_color "Авторизация не удалась. Проверьте логин и пароль и попробуйте снова."
             exit 1
         fi
@@ -45,18 +47,26 @@ select_cluster() {
 
 # Функция для выбора namespace
 select_namespace() {
-    echo_color "Доступные namespaces:"
-    oc get namespaces --no-headers | awk '{print NR") "$1}'
-    echo "Введите номер namespace или 0 для выбора всех:"
-    read -rp "Ваш выбор: " ns_choice
-    if ! [[ "$ns_choice" =~ ^[0-9]+$ ]] || [ "$ns_choice" -gt "$(oc get namespaces --no-headers | wc -l)" ]; then
-        echo_color "Неверный выбор namespace. Попробуйте снова."
-        select_namespace
-    elif [[ "$ns_choice" == "0" ]]; then
-        NAMESPACES=$(oc get namespaces -o=jsonpath='{.items[*].metadata.name}')
-    else
-        NAMESPACES=$(oc get namespaces --no-headers | awk "NR==$ns_choice {print \$1}")
+    echo_color "Доступные проекты:"
+    if ! oc projects 2>>$ERROR_LOG | grep -v "You have access to" | awk '{print $1}' | sed 's/^\*//g' > available_projects.txt; then
+        echo_color "Ошибка при получении списка проектов. Смотрите $ERROR_LOG для подробностей."
+        exit 1
     fi
+    cat available_projects.txt | nl -w1 -s') '
+
+    echo "Введите номер проекта или 0 для выбора всех доступных проектов:"
+    read -rp "Ваш выбор: " project_choice
+
+    if [[ "$project_choice" == "0" ]]; then
+        NAMESPACES=$(cat available_projects.txt)
+    else
+        NAMESPACES=$(awk "NR==$project_choice {print \$1}" available_projects.txt)
+        if [ -z "$NAMESPACES" ]; then
+            echo_color "Неверный выбор проекта. Попробуйте снова."
+            select_namespace
+        fi
+    fi
+    rm available_projects.txt
 }
 
 # Функция для запроса временного интервала логов
@@ -75,7 +85,7 @@ fetch_logs() {
     request_log_time
     for ns in $NAMESPACES; do
         echo_color "Выбор подов в namespace $ns:"
-        oc get pods -n "$ns" --no-headers | awk '{print NR") "$1}'
+        oc get pods -n "$ns" --no-headers > /dev/null 2>>$ERROR_LOG | awk '{print NR") "$1}'
         echo "Введите номера подов, для которых загрузить логи, разделяя запятыми или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
         if [[ "$pod_choices" == "0" ]]; then
@@ -90,16 +100,19 @@ fetch_logs() {
                 local timestamp=$(date "+%Y%m%d-%H%M%S")
                 local log_path="./$ns/$pod/$container-$timestamp.log"
                 mkdir -p "./$ns/$pod"
-                oc logs "$pod" -c "$container" -n "$ns" $SINCE_TIME --timestamps > "$log_path"
-                echo_color "Логи сохранены: $log_path"
+                if ! oc logs "$pod" -c "$container" -n "$ns" $SINCE_TIME --timestamps > "$log_path" 2>>$ERROR_LOG; then
+                    echo_color "Ошибка при получении логов для $container. Смотрите $ERROR_LOG для подробностей."
+                else
+                    echo_color "Логи сохранены: $log_path"
+                fi
             done
         done
     done
 }
 
 # Основной код скрипта
-echo_color "Начало работы скрипта OpenShift Logs"
+echo_color "Начало работы скрипта OpenShift Tools"
 select_cluster
 select_namespace
 fetch_logs
-echo_color "Завершение работы скрипта OpenShift Logs"
+echo_color "Завершение работы скрипта OpenShift Tools"
