@@ -26,17 +26,14 @@ execute_command() {
 login_to_cluster() {
     SERVER_URL=$1
     TOKEN=$2
-    local line_number=$3
     if ! execute_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
         echo_color "Авторизация по токену не удалась. Попробуем логин и пароль."
         read -rp "Введите ваш логин: " username
         read -rsp "Введите ваш пароль: " password
         echo
         if execute_command "oc login -u '$username' -p '$password' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
-            # Получение нового токена после успешного входа
             new_token=$(oc whoami -t)
             if [ -n "$new_token" ]; then
-                # Обновление файла конфигурации с новым токеном
                 sed -i "${line_number}s| .*| $new_token|" "$CONFIG_FILE"
                 echo_color "Токен успешно обновлен в конфигурационном файле."
             fi
@@ -66,11 +63,11 @@ select_cluster() {
     else
         SERVER_URL=$(echo $selected_line | cut -d' ' -f1)
         TOKEN=$(echo $selected_line | cut -d' ' -f2)
-        login_to_cluster "$SERVER_URL" "$TOKEN" "$cluster_number"
+        login_to_cluster "$SERVER_URL" "$TOKEN"
     fi
 }
 
-# Функция для выбора namespace, используя доступные проекты
+# Функция для выбора namespace
 select_namespace() {
     echo_color "Доступные проекты:"
     local projects
@@ -80,7 +77,7 @@ select_namespace() {
     fi
     
     if [ -z "$projects" ]; then
-        echo_color "Ошибка: Не найдено проектов. Проверьте доступность и права доступа."
+        echo_color "Не найдено проектов. Проверьте доступность и права доступа."
         exit 1
     fi
 
@@ -105,7 +102,6 @@ select_namespace() {
         fi
     fi
 }
-
 # Функция для запроса временного интервала для логов
 request_log_time() {
     echo "Введите время в формате '1h' для 1 часа или '30m' для 30 минут, или оставьте пустым для всех логов:"
@@ -131,7 +127,7 @@ fetch_logs() {
         fi
 
         if [ -z "$pods" ]; then
-            echo_color "Ошибка: Не найдено подов в namespace $ns. Проверьте доступность и права доступа."
+            echo_color "Не найдено подов в namespace $ns. Проверьте доступность и права доступа."
             continue
         fi
 
@@ -153,8 +149,12 @@ fetch_logs() {
 
         for pod in "${selected_pods[@]}"; do
             echo "Загружаем список контейнеров в поде $pod..."
-            local containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
-            
+            local containers
+            if ! containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'"); then
+                echo_color "Ошибка при получении списка контейнеров. Смотрите $ERROR_LOG для подробностей."
+                continue
+            fi
+
             for container in $containers; do
                 local timestamp=$(date "+%Y%m%d-%H%M%S")
                 local log_path="./logs/$ns/$pod/$container-$timestamp.log"
@@ -169,50 +169,9 @@ fetch_logs() {
     done
 }
 
-process_pod_selection() {
-    local pod_choices=$1
-    local pods=$2
-    local ns=$3
-
-    if [[ "$pod_choices" == "0" ]]; then
-        selected_pods=("${pods[@]}")
-    else
-        IFS=',' read -ra chosen_indices <<< "$pod_choices"
-        selected_pods=()
-        for index in "${chosen_indices[@]}"; do
-            ((index--))
-            selected_pods+=("${pods[index]}")
-        done
-    fi
-
-    fetch_pod_logs "$selected_pods" "$ns"
-}
-
-fetch_pod_logs() {
-    local selected_pods=$1
-    local ns=$2
-
-    for pod in "${selected_pods[@]}"; do
-        echo "Загружаем список контейнеров в поде $pod..."
-        local containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
-
-        for container in $containers; do
-            local timestamp=$(date "+%Y%m%d-%H%M%S")
-            local log_path="./logs/$ns/$pod/$container-$timestamp.log"
-            mkdir -p "$(dirname "$log_path")"
-            if ! execute_command "oc logs $pod -c $container -n $ns --timestamps" > "$log_path"; then
-                echo_color "Ошибка при загрузке логов для $container. Смотрите $ERROR_LOG для подробностей."
-            else
-                echo_color "Логи сохранены: $log_path"
-            fi
-        done
-    done
-}
-
-
 # Основной код скрипта
 echo_color "Начало работы скрипта OpenShift Tools"
 select_cluster
 select_namespace
-fetch_logs
+fetch_logs  # Убедитесь, что функция fetch_logs определена и включена
 echo_color "Завершение работы скрипта OpenShift Tools"
