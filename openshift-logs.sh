@@ -1,14 +1,13 @@
 #!/bin/bash
 
-# Путь к файлу конфигурации кластеров
+# Пути к файлам конфигурации и логирования ошибок
 CONFIG_FILE="clusters.conf"
-# Путь к файлу лога ошибок
 ERROR_LOG="error_log.txt"
 
-# Переменная для включения режима отладки
+# Переменная для активации режима отладки
 DEBUG=${DEBUG:-0}
 
-# Функция для печати с цветом
+# Функция для вывода текста с цветом
 echo_color() {
     echo -e "\e[1;34m$1\e[0m"
 }
@@ -16,9 +15,9 @@ echo_color() {
 # Функция для выполнения команд с учетом режима отладки
 execute_command() {
     if [ "$DEBUG" -eq 1 ]; then
-        eval "$@"  # Выполнение команды с выводом в консоль
+        eval "$@"  # Выполнение с выводом в консоль
     else
-        eval "$@" 2>>$ERROR_LOG  # Вывод ошибок в лог, но сохранение стандартного вывода
+        eval "$@" &>>$ERROR_LOG  # Перенаправление всех выводов в файл лога ошибок
     fi
 }
 
@@ -67,7 +66,7 @@ select_cluster() {
     fi
 }
 
-# Функция для выбора namespace
+# Функция для выбора пространства имен
 select_namespace() {
     echo_color "Доступные проекты:"
     local projects
@@ -102,9 +101,10 @@ select_namespace() {
         fi
     fi
 }
+
 # Функция для запроса временного интервала для логов
 request_log_time() {
-    echo "Введите время в формате '1h' для 1 часа или '30m' для 30 минут, или оставьте пустым для всех логов:"
+    echo "Введите временной интервал в формате '1h' для 1 часа или '30m' для 30 минут, или оставьте пустым для всех логов:"
     read -rp "Временной интервал: " time_interval
     if [[ $time_interval =~ ^[0-9]+[hm]$ ]]; then
         SINCE_TIME="--since=$time_interval"
@@ -115,7 +115,7 @@ request_log_time() {
 
 # Функция для выбора подов и загрузки логов
 fetch_logs() {
-    request_log_time
+    select_namespace  # Переместил вызов функции сюда, чтобы сначала выбрать namespace
     for ns in $NAMESPACES; do
         echo_color "Работаем в namespace: $ns"
         echo "Загружаем список подов в namespace $ns..."
@@ -134,7 +134,7 @@ fetch_logs() {
         echo "$pods" | nl -w1 -s') '
         echo "Введите номера подов, для которых загрузить логи, разделяя запятыми, или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
-        
+
         local selected_pods
         if [[ "$pod_choices" == "0" ]]; then
             selected_pods=($pods)
@@ -147,6 +147,7 @@ fetch_logs() {
             done
         fi
 
+        request_log_time  # Запрашиваем временной интервал после выбора подов
         for pod in "${selected_pods[@]}"; do
             echo "Загружаем список контейнеров в поде $pod..."
             local containers
@@ -160,7 +161,7 @@ fetch_logs() {
                 local log_path="./logs/$ns/$pod/$container-$timestamp.log"
                 mkdir -p "$(dirname "$log_path")"
                 if ! execute_command "oc logs $pod -c $container -n $ns --timestamps $SINCE_TIME" > "$log_path"; then
-                    echo_color "Ошибка при загрузке логов для $container. Смотрите $ERROR_LOG для подробностей."
+                    echo_color "Ошибка при загрузке логов для контейнера $container. Смотрите $ERROR_LOG для подробностей."
                 else
                     echo_color "Логи сохранены: $log_path"
                 fi
@@ -169,9 +170,8 @@ fetch_logs() {
     done
 }
 
-# Основной код скрипта
+# Основное выполнение скрипта
 echo_color "Начало работы скрипта OpenShift Tools"
 select_cluster
-select_namespace
-fetch_logs  # Убедитесь, что функция fetch_logs определена и включена
+fetch_logs
 echo_color "Завершение работы скрипта OpenShift Tools"
