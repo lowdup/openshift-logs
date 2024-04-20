@@ -22,10 +22,7 @@ execute_command() {
     fi
 }
 
-# Теперь функция `execute_command` будет всегда возвращать стандартный вывод команды,
-# но при DEBUG=0 ошибки будут перенаправляться в лог.
-
-# Функция для входа в кластер
+# Функция для входа в кластер и обновления токена
 login_to_cluster() {
     SERVER_URL=$1
     TOKEN=$2
@@ -50,7 +47,6 @@ login_to_cluster() {
     fi
 }
 
-
 # Функция для выбора кластера
 select_cluster() {
     echo_color "Выберите кластер:"
@@ -70,14 +66,13 @@ select_cluster() {
     else
         SERVER_URL=$(echo $selected_line | cut -d' ' -f1)
         TOKEN=$(echo $selected_line | cut -d' ' -f2)
-        login_to_cluster "$SERVER_URL" "$TOKEN"
+        login_to_cluster "$SERVER_URL" "$TOKEN" "$cluster_number"
     fi
 }
 
 # Функция для выбора namespace, используя доступные проекты
 select_namespace() {
     echo_color "Доступные проекты:"
-    # Получаем и обрабатываем список доступных проектов, сохраняем в переменную
     local projects
     if ! projects=$(oc projects 2>>$ERROR_LOG | sed '1,2d' | sed '$d' | sed '$d' | sed 's/^[[:space:]]*\*?[[:space:]]*//'); then
         echo_color "Ошибка при получении списка проектов. Смотрите $ERROR_LOG для подробностей."
@@ -89,7 +84,6 @@ select_namespace() {
         exit 1
     fi
 
-    # Выводим список проектов с номерами
     local IFS=$'\n'
     local i=1
     for project in $projects; do
@@ -111,8 +105,6 @@ select_namespace() {
         fi
     fi
 }
-
-
 
 # Функция для запроса временного интервала логов
 request_log_time() {
