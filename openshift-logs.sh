@@ -30,19 +30,20 @@ select_cluster() {
             continue
         fi
         clusters+=("$line")
-        echo "$i) $(echo $line | cut -d' ' -f1)"
+        echo "$i) $(echo "$line" | cut -d' ' -f1)"
         ((i++))
     done < "$CONFIG_FILE"
+    
     read -rp "Введите номер кластера: " cluster_number
-    cluster_number=$((cluster_number-1))
+    local index=$((cluster_number - 1))
 
-    if [ -z "${clusters[$cluster_number]}" ]; then
+    if [[ -z "${clusters[index]}" ]]; then
         echo_color "Неверный выбор кластера. Попробуйте снова."
         select_cluster
     else
-        local cluster_info=(${clusters[$cluster_number]})
-        SERVER_URL="${cluster_info[0]}"
-        TOKEN="${cluster_info[1]}"
+        local cluster_info=(${clusters[index]})
+        local SERVER_URL="${cluster_info[0]}"
+        local TOKEN="${cluster_info[1]}"
 
         if [[ -z "$TOKEN" || ! oc_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true" ]]; then
             echo_color "Авторизация по токену не удалась или токен отсутствует. Попробуйте логин и пароль."
@@ -50,17 +51,11 @@ select_cluster() {
             read -rsp "Введите ваш пароль: " password
             echo
             if oc_command "oc login -u '$username' -p '$password' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
-                new_token=$(oc whoami -t)
-                if [ -n "$new_token" ]; then
-                    echo_color "Токен успешно получен."
-                    # Обновляем или добавляем токен в конфигурационный файл
-                    if [ -z "${cluster_info[1]}" ]; then
-                        # Добавляем новый токен, если ранее токен отсутствовал
-                        sed -i "$((cluster_number+1))s|.*|$SERVER_URL $new_token|" "$CONFIG_FILE"
-                    else
-                        # Обновляем существующий токен
-                        sed -i "$((cluster_number+1))s|.*|$SERVER_URL $new_token|" "$CONFIG_FILE"
-                    fi
+                new_token=$(oc_command "oc whoami -t")
+                if [[ -n "$new_token" ]]; then
+                    echo_color "Токен успешно получен и обновлен."
+                    clusters[index]="$SERVER_URL $new_token"
+                    printf "%s\n" "${clusters[@]}" > "$CONFIG_FILE"
                     echo_color "Токен успешно обновлен в конфигурационном файле."
                 else
                     echo_color "Не удалось получить новый токен."
