@@ -2,7 +2,7 @@
 
 CONFIG_FILE="clusters.conf"
 ERROR_LOG="error_log.txt"
-DEBUG=${DEBUG:-0}
+DEBUG=1
 
 echo_color() {
     echo -e "\e[1;34m$1\e[0m"
@@ -105,14 +105,16 @@ fetch_logs() {
     for ns in $NAMESPACES; do
         echo_color "\e[1;36mРаботаем в namespace: $ns\e[0m"
         local pods
-        # IFS=$'\n' read -d '' -ra pods < <(oc_command "oc get pods -n $ns --no-headers | awk '{print $1}'" && printf '\0')
-        # IFS=$'\n' read -d '' -ra pods < <(oc_command "oc get pods -n $ns --no-headers" | awk '{print $1}' && printf '\0')
-        mapfile -t pods < <(oc_command "oc get pods -n $ns --no-headers" | awk '{print $1}')
+        mapfile -t pods < <(oc get pods -n $ns --no-headers | awk '{print $1}')
+        
         if [ ${#pods[@]} -eq 0 ]; then
             echo_color "\e[1;31mВ namespace $ns не найдено подов.\e[0m"
             continue
         fi
-        echo "$pods" | nl -w1 -s') '
+        
+        echo "Доступные поды:"
+        printf '%s\n' "${pods[@]}" | nl -w1 -s') '
+        
         echo "Введите номера подов (разделенных запятыми) или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
         local selected_pods=()
@@ -135,7 +137,7 @@ fetch_logs() {
         for pod in "${selected_pods[@]}"; do
             echo_color "\e[1;33mЗагружаем список контейнеров в поде $pod...\e[0m"
             local containers
-            containers=$(oc_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
+            containers=$(oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}')
             if [ -z "$containers" ]; then
                 echo_color "\e[1;31mВ поде $pod не найдено контейнеров.\e[0m"
                 continue
@@ -147,7 +149,7 @@ fetch_logs() {
                 local log_path="./logs/$ns/$pod/$container-$timestamp.log"
                 mkdir -p "$(dirname "$log_path")"
                 echo_color "\e[1;34mЗагрузка логов для $container...\e[0m"
-                if oc_command "oc logs $pod -c $container -n $ns $SINCE_TIME > $log_path"; then
+                if oc logs $pod -c $container -n $ns $SINCE_TIME > "$log_path"; then
                     echo_color "\e[1;32mЛоги сохранены: $log_path\e[0m"
                 else
                     echo_color "\e[1;31mОшибка при загрузке логов для $container в $pod.\e[0m"
@@ -157,6 +159,7 @@ fetch_logs() {
         done
     done
 }
+
 
 
 echo_color "Начало работы скрипта OpenShift Tools"
