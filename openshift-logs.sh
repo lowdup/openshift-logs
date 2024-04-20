@@ -18,7 +18,7 @@ execute_command() {
     if [ "$DEBUG" -eq 1 ]; then
         eval "$@" |& tee -a $ERROR_LOG
     else
-        eval "$@" >>$ERROR_LOG 2>&1
+        eval "$@" 2>&1 | tee -a $ERROR_LOG
     fi
 }
 
@@ -71,13 +71,9 @@ select_cluster() {
 select_namespace() {
     echo_color "Доступные проекты:"
     local projects
-    if ! projects=$(oc projects --no-headers 2>>$ERROR_LOG | sed 's/^[* ]*//'); then
-        echo_color "Ошибка при получении списка проектов. Смотрите $ERROR_LOG для подробностей."
-        exit 1
-    fi
-
+    projects=$(execute_command "oc projects --no-headers" | sed '1,2d' | sed '$d' | sed 's/^[* ]*//')  # Обработка вывода команды для получения списка проектов
     if [ -z "$projects" ]; then
-        echo_color "Не найдено проектов. Проверьте доступность и права доступа."
+        echo_color "Ошибка при получении списка проектов или проекты отсутствуют. Смотрите $ERROR_LOG для подробностей."
         exit 1
     fi
 
@@ -109,11 +105,7 @@ fetch_logs() {
         echo_color "Работаем в namespace: $ns"
         echo "Загружаем список подов в namespace $ns..."
         local pods
-        if ! pods=$(execute_command "oc get pods -n $ns --no-headers" | awk '{print $1}'); then
-            echo_color "Ошибка при получении списка подов. Смотрите $ERROR_LOG для подробностей."
-            continue
-        fi
-
+        pods=$(execute_command "oc get pods -n $ns --no-headers" | awk '{print $1}')
         if [ -z "$pods" ]; then
             echo_color "Не найдено подов в namespace $ns. Проверьте доступность и права доступа."
             continue
@@ -130,17 +122,18 @@ fetch_logs() {
             IFS=',' read -ra chosen_indices <<< "$pod_choices"
             selected_pods=()
             for index in "${chosen_indices[@]}"; do
-                ((index--))  # уменьшаем индекс на 1, так как массивы в bash начинаются с 0
+                ((index--))
                 selected_pods+=("${pods[index]}")
             done
         fi
 
-        request_log_time  # Запрос временного интервала перед загрузкой логов
+        request_log_time
 
         for pod in "${selected_pods[@]}"; do
             echo "Загружаем список контейнеров в поде $pod..."
             local containers
-            if ! containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'"); then
+            containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
+            if [ -z "$containers" ]; then
                 echo_color "Ошибка при получении списка контейнеров. Смотрите $ERROR_LOG для подробностей."
                 continue
             fi
