@@ -105,29 +105,38 @@ fetch_logs() {
     for ns in $NAMESPACES; do
         echo_color "Работаем в namespace: $ns"
         echo "Загружаем список подов в namespace $ns..."
-        if ! execute_command "oc get pods -n $ns --no-headers" | awk '{print NR") "$1}' > pods_list.txt; then
+        
+        # Получаем список подов и контейнеров сразу
+        if ! pods=$(execute_command "oc get pods -n $ns --no-headers" | awk '{print NR") "$1}'); then
             echo_color "Ошибка при получении списка подов. Смотрите $ERROR_LOG для подробностей."
             continue
         fi
-        cat pods_list.txt
 
+        if [ -z "$pods" ]; then
+            echo_color "Нет доступных подов в namespace $ns."
+            continue
+        fi
+
+        echo "$pods"
         echo "Введите номера подов, для которых загрузить логи, разделяя запятыми, или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
 
         if [[ "$pod_choices" == "0" ]]; then
-            pods=$(awk '{print $2}' pods_list.txt)
+            selected_pods=$(echo "$pods" | awk '{print $2}')
         else
             IFS=',' read -ra chosen_pods <<< "$pod_choices"
-            pods=$(for i in "${chosen_pods[@]}"; do awk -v num="$i" 'NR==num {print $2}' pods_list.txt; done)
+            selected_pods=$(for i in "${chosen_pods[@]}"; do echo "$pods" | awk -v num="$i" 'NR==num {print $2}'; done)
         fi
 
-        for pod in $pods; do
+        for pod in $selected_pods; do
             echo "Загружаем список контейнеров в поде $pod..."
-            if ! execute_command "oc get pods $pod -n $ns -o=jsonpath='{.spec.containers[*].name}'" > containers_list.txt; then
-                echo_color "Ошибка при получении списка контейнеров. Смотрите $ERROR_LOG для подробностей."
+            containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
+
+            if [ -z "$containers" ]; then
+                echo_color "Нет доступных контейнеров в поде $pod."
                 continue
             fi
-            containers=$(cat containers_list.txt)
+
             echo "Контейнеры в поде $pod: $containers"
             echo "Загрузка логов для всех контейнеров в поде $pod..."
 
@@ -142,7 +151,6 @@ fetch_logs() {
                 fi
             done
         done
-        rm pods_list.txt containers_list.txt
     done
 }
 
