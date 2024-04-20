@@ -115,37 +115,39 @@ fetch_logs() {
         echo_color "Работаем в namespace: $ns"
         echo "Загружаем список подов в namespace $ns..."
         
-        # Получаем список подов и контейнеров сразу
-        if ! pods=$(execute_command "oc get pods -n $ns --no-headers" | awk '{print NR") "$1}'); then
-            echo_color "Ошибка при получении списка подов. Смотрите $ERROR_LOG для подробностей."
+        # Получаем список подов
+        mapfile -t pods < <(execute_command "oc get pods -n $ns --no-headers" | awk '{print $1}')
+        if [ ${#pods[@]} -eq 0 ]; then
+            echo_color "Ошибка: Не найдено подов в namespace $ns. Проверьте доступность и права доступа."
             continue
         fi
 
-        if [ -z "$pods" ]; then
-            echo_color "Нет доступных подов в namespace $ns."
-            continue
-        fi
+        # Выводим список подов с номерами
+        local count=1
+        for pod in "${pods[@]}"; do
+            echo "$count) $pod"
+            ((count++))
+        done
 
-        echo "$pods"
         echo "Введите номера подов, для которых загрузить логи, разделяя запятыми, или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
-
+        
         if [[ "$pod_choices" == "0" ]]; then
-            selected_pods=$(echo "$pods" | awk '{print $2}')
+            selected_pods=("${pods[@]}")
         else
-            IFS=',' read -ra chosen_pods <<< "$pod_choices"
-            selected_pods=$(for i in "${chosen_pods[@]}"; do echo "$pods" | awk -v num="$i" 'NR==num {print $2}'; done)
+            IFS=',' read -ra chosen_indices <<< "$pod_choices"
+            selected_pods=()
+            for index in "${chosen_indices[@]}"; do
+                ((index--))  # уменьшаем индекс на 1, так как массивы в bash начинаются с 0
+                selected_pods+=("${pods[index]}")
+            done
         fi
 
-        for pod in $selected_pods; do
+        # Перебор выбранных подов и загрузка логов
+        for pod in "${selected_pods[@]}"; do
             echo "Загружаем список контейнеров в поде $pod..."
             containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
-
-            if [ -z "$containers" ]; then
-                echo_color "Нет доступных контейнеров в поде $pod."
-                continue
-            fi
-
+            
             echo "Контейнеры в поде $pod: $containers"
             echo "Загрузка логов для всех контейнеров в поде $pod..."
 
