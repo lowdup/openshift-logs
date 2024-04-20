@@ -30,17 +30,23 @@ login_to_cluster() {
 select_cluster() {
     echo_color "Выберите кластер:"
     local i=1
+    # Читаем файл, игнорируем строки, начинающиеся с '#'
     while read -r line; do
+        if [[ "$line" =~ ^# ]]; then
+            continue
+        fi
         echo "$i) $(echo $line | cut -d' ' -f1)"
         i=$((i+1))
     done < "$CONFIG_FILE"
     read -rp "Введите номер кластера: " cluster_number
-    if ! [[ "$cluster_number" =~ ^[0-9]+$ ]] || [ "$(sed -n "$cluster_number p" "$CONFIG_FILE")" == "" ]; then
+    # Снова читаем файл для получения данных, игнорируя комментарии
+    local selected_line=$(awk 'NF && $1 !~ /^#/ {print NR" "$0}' "$CONFIG_FILE" | awk -v num="$cluster_number" '$1 == num {print $2,$3}')
+    if [ -z "$selected_line" ]; then
         echo_color "Неверный выбор кластера. Попробуйте снова."
         select_cluster
     else
-        SERVER_URL=$(sed -n "${cluster_number}p" "$CONFIG_FILE" | cut -d' ' -f1)
-        TOKEN=$(sed -n "${cluster_number}p" "$CONFIG_FILE" | cut -d' ' -f2)
+        SERVER_URL=$(echo $selected_line | cut -d' ' -f1)
+        TOKEN=$(echo $selected_line | cut -d' ' -f2)
         login_to_cluster "$SERVER_URL" "$TOKEN"
     fi
 }
