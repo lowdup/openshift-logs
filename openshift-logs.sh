@@ -114,56 +114,68 @@ fetch_logs() {
     for ns in $NAMESPACES; do
         echo_color "Работаем в namespace: $ns"
         echo "Загружаем список подов в namespace $ns..."
-        
-        # Получаем список подов
-        mapfile -t pods < <(execute_command "oc get pods -n $ns --no-headers" | awk '{print $1}')
-        if [ ${#pods[@]} -eq 0 ]; then
+
+        # Чтение списка подов и запись в файл для отладки
+        if ! pods=$(execute_command "oc get pods -n $ns --no-headers" | tee pods_output.txt | awk '{print $1}'); then
+            echo_color "Ошибка при получении списка подов. Смотрите $ERROR_LOG и pods_output.txt для подробностей."
+            continue
+        fi
+
+        if [ -z "$pods" ]; then
             echo_color "Ошибка: Не найдено подов в namespace $ns. Проверьте доступность и права доступа."
             continue
         fi
 
-        # Выводим список подов с номерами
-        local count=1
-        for pod in "${pods[@]}"; do
-            echo "$count) $pod"
-            ((count++))
-        done
-
+        # Выводим список подов
+        echo "$pods"
         echo "Введите номера подов, для которых загрузить логи, разделяя запятыми, или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
         
-        if [[ "$pod_choices" == "0" ]]; then
-            selected_pods=("${pods[@]}")
-        else
-            IFS=',' read -ra chosen_indices <<< "$pod_choices"
-            selected_pods=()
-            for index in "${chosen_indices[@]}"; do
-                ((index--))  # уменьшаем индекс на 1, так как массивы в bash начинаются с 0
-                selected_pods+=("${pods[index]}")
-            done
-        fi
+        # Обработка выбора пользователем
+        process_pod_selection "$pod_choices" "$pods" "$ns"
+    done
+}
 
-        # Перебор выбранных подов и загрузка логов
-        for pod in "${selected_pods[@]}"; do
-            echo "Загружаем список контейнеров в поде $pod..."
-            containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
-            
-            echo "Контейнеры в поде $pod: $containers"
-            echo "Загрузка логов для всех контейнеров в поде $pod..."
+process_pod_selection() {
+    local pod_choices=$1
+    local pods=$2
+    local ns=$3
 
-            for container in $containers; do
-                local timestamp=$(date "+%Y%m%d-%H%M%S")
-                local log_path="./logs/$ns/$pod/$container-$timestamp.log"
-                mkdir -p "$(dirname "$log_path")"
-                if ! execute_command "oc logs $pod -c $container -n $ns --timestamps" > "$log_path"; then
-                    echo_color "Ошибка при загрузке логов для $container. Смотрите $ERROR_LOG для подробностей."
-                else
-                    echo_color "Логи сохранены: $log_path"
-                fi
-            done
+    if [[ "$pod_choices" == "0" ]]; then
+        selected_pods=("${pods[@]}")
+    else
+        IFS=',' read -ra chosen_indices <<< "$pod_choices"
+        selected_pods=()
+        for index in "${chosen_indices[@]}"; do
+            ((index--))
+            selected_pods+=("${pods[index]}")
+        done
+    fi
+
+    fetch_pod_logs "$selected_pods" "$ns"
+}
+
+fetch_pod_logs() {
+    local selected_pods=$1
+    local ns=$2
+
+    for pod in "${selected_pods[@]}"; do
+        echo "Загружаем список контейнеров в поде $pod..."
+        local containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
+
+        for container in $containers; do
+            local timestamp=$(date "+%Y%m%d-%H%M%S")
+            local log_path="./logs/$ns/$pod/$container-$timestamp.log"
+            mkdir -p "$(dirname "$log_path")"
+            if ! execute_command "oc logs $pod -c $container -n $ns --timestamps" > "$log_path"; then
+                echo_color "Ошибка при загрузке логов для $container. Смотрите $ERROR_LOG для подробностей."
+            else
+                echo_color "Логи сохранены: $log_path"
+            fi
         done
     done
 }
+
 
 # Основной код скрипта
 echo_color "Начало работы скрипта OpenShift Tools"
