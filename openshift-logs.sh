@@ -105,7 +105,9 @@ fetch_logs() {
     for ns in $NAMESPACES; do
         echo_color "\e[1;36mРаботаем в namespace: $ns\e[0m"
         local pods
-        IFS=$'\n' read -d '' -ra pods < <(oc_command "oc get pods -n $ns --no-headers | awk '{print $1}'" && printf '\0')
+        # IFS=$'\n' read -d '' -ra pods < <(oc_command "oc get pods -n $ns --no-headers | awk '{print $1}'" && printf '\0')
+        # IFS=$'\n' read -d '' -ra pods < <(oc_command "oc get pods -n $ns --no-headers" | awk '{print $1}' && printf '\0')
+        mapfile -t pods < <(oc_command "oc get pods -n $ns --no-headers" | awk '{print $1}')
         if [ ${#pods[@]} -eq 0 ]; then
             echo_color "\e[1;31mВ namespace $ns не найдено подов.\e[0m"
             continue
