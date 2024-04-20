@@ -62,10 +62,12 @@ select_cluster() {
     fi
 }
 
-# Функция для выбора namespace
+# Функция для выбора namespace, используя доступные проекты
 select_namespace() {
     echo_color "Доступные проекты:"
-    if ! execute_command "oc projects | sed -e '1,2d' -e '/^$/d' -e '$d' | awk '{print \$1}' | sed 's/^\*//'" > available_projects.txt; then
+    # Получаем список доступных проектов и обрабатываем его
+    oc projects 2>>$ERROR_LOG | sed '1,2d' | sed '$d' | sed '$d' | sed 's/^  \* //' > available_projects.txt
+    if [ ! -s available_projects.txt ]; then
         echo_color "Ошибка: Не удалось получить список проектов или список проектов пуст. Проверьте $ERROR_LOG для подробностей."
         exit 1
     fi
@@ -85,6 +87,7 @@ select_namespace() {
     fi
     rm available_projects.txt
 }
+
 
 # Функция для запроса временного интервала логов
 request_log_time() {
