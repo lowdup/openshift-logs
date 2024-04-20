@@ -16,11 +16,14 @@ echo_color() {
 # Функция для выполнения команд с учетом режима отладки
 execute_command() {
     if [ "$DEBUG" -eq 1 ]; then
-        eval "$@"
+        eval "$@"  # Выполнение команды с выводом в консоль
     else
-        eval "$@" > /dev/null 2>>$ERROR_LOG
+        eval "$@" 2>>$ERROR_LOG  # Вывод ошибок в лог, но сохранение стандартного вывода
     fi
 }
+
+# Теперь функция `execute_command` будет всегда возвращать стандартный вывод команды,
+# но при DEBUG=0 ошибки будут перенаправляться в лог.
 
 # Функция для входа в кластер
 login_to_cluster() {
@@ -115,23 +118,17 @@ fetch_logs() {
         echo_color "Работаем в namespace: $ns"
         echo "Загружаем список подов в namespace $ns..."
 
-        # Чтение списка подов и запись в файл для отладки
-        if ! pods=$(execute_command "oc get pods -n $ns --no-headers" | tee pods_output.txt | awk '{print $1}'); then
-            echo_color "Ошибка при получении списка подов. Смотрите $ERROR_LOG и pods_output.txt для подробностей."
-            continue
-        fi
-
+        pods=$(execute_command "oc get pods -n $ns --no-headers" | awk '{print $1}')
         if [ -z "$pods" ]; then
             echo_color "Ошибка: Не найдено подов в namespace $ns. Проверьте доступность и права доступа."
             continue
         fi
 
         # Выводим список подов
-        echo "$pods"
+        echo "$pods" | nl -w1 -s') '
+
         echo "Введите номера подов, для которых загрузить логи, разделяя запятыми, или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
-        
-        # Обработка выбора пользователем
         process_pod_selection "$pod_choices" "$pods" "$ns"
     done
 }
