@@ -106,35 +106,66 @@ select_namespace() {
     fi
 }
 
-# Функция для запроса временного интервала логов
+# Функция для запроса временного интервала для логов
 request_log_time() {
     echo "Введите время в формате '1h' для 1 часа или '30m' для 30 минут, или оставьте пустым для всех логов:"
     read -rp "Временной интервал: " time_interval
     if [[ $time_interval =~ ^[0-9]+[hm]$ ]]; then
-        SINCE_TIME="--since=$time_interval"request_log_time
+        SINCE_TIME="--since=$time_interval"
     else
         SINCE_TIME=""
     fi
 }
 
-# Функция для выбора и загрузки логов
+# Функция для выбора подов и загрузки логов
 fetch_logs() {
+    request_log_time
     for ns in $NAMESPACES; do
         echo_color "Работаем в namespace: $ns"
         echo "Загружаем список подов в namespace $ns..."
 
-        pods=$(execute_command "oc get pods -n $ns --no-headers" | awk '{print $1}')
+        local pods
+        if ! pods=$(execute_command "oc get pods -n $ns --no-headers" | awk '{print $1}'); then
+            echo_color "Ошибка при получении списка подов. Смотрите $ERROR_LOG для подробностей."
+            continue
+        fi
+
         if [ -z "$pods" ]; then
             echo_color "Ошибка: Не найдено подов в namespace $ns. Проверьте доступность и права доступа."
             continue
         fi
 
-        # Выводим список подов
         echo "$pods" | nl -w1 -s') '
-
         echo "Введите номера подов, для которых загрузить логи, разделяя запятыми, или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
-        process_pod_selection "$pod_choices" "$pods" "$ns"
+        
+        local selected_pods
+        if [[ "$pod_choices" == "0" ]]; then
+            selected_pods=($pods)
+        else
+            IFS=',' read -ra chosen_indices <<< "$pod_choices"
+            selected_pods=()
+            for index in "${chosen_indices[@]}"; do
+                ((index--))  # уменьшаем индекс на 1, так как массивы в bash начинаются с 0
+                selected_pods+=("${pods[index]}")
+            done
+        fi
+
+        for pod in "${selected_pods[@]}"; do
+            echo "Загружаем список контейнеров в поде $pod..."
+            local containers=$(execute_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
+            
+            for container in $containers; do
+                local timestamp=$(date "+%Y%m%d-%H%M%S")
+                local log_path="./logs/$ns/$pod/$container-$timestamp.log"
+                mkdir -p "$(dirname "$log_path")"
+                if ! execute_command "oc logs $pod -c $container -n $ns --timestamps $SINCE_TIME" > "$log_path"; then
+                    echo_color "Ошибка при загрузке логов для $container. Смотрите $ERROR_LOG для подробностей."
+                else
+                    echo_color "Логи сохранены: $log_path"
+                fi
+            done
+        done
     done
 }
 
