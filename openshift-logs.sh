@@ -5,32 +5,44 @@ CONFIG_FILE="clusters.conf"
 # Путь к файлу лога ошибок
 ERROR_LOG="error_log.txt"
 
+# Переменная для включения режима отладки
+DEBUG=${DEBUG:-0}
+
 # Функция для печати с цветом
 echo_color() {
     echo -e "\e[1;34m$1\e[0m"
+}
+
+# Функция для выполнения команд с учетом режима отладки
+execute_command() {
+    if [ "$DEBUG" -eq 1 ]; then
+        eval "$@"
+    else
+        eval "$@" > /dev/null 2>>$ERROR_LOG
+    fi
 }
 
 # Функция для входа в кластер
 login_to_cluster() {
     SERVER_URL=$1
     TOKEN=$2
-    if ! oc login --token="$TOKEN" --server="$SERVER_URL" --insecure-skip-tls-verify=true > /dev/null 2>>$ERROR_LOG; then
+    if ! execute_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
         echo_color "Авторизация по токену не удалась. Попробуем логин и пароль."
         read -rp "Введите ваш логин: " username
         read -rsp "Введите ваш пароль: " password
         echo
-        if ! oc login -u "$username" -p "$password" --server="$SERVER_URL" --insecure-skip-tls-verify=true > /dev/null 2>>$ERROR_LOG; then
+        if ! execute_command "oc login -u '$username' -p '$password' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
             echo_color "Авторизация не удалась. Проверьте логин и пароль и попробуйте снова."
             exit 1
         fi
     fi
 }
 
+
 # Функция для выбора кластера
 select_cluster() {
     echo_color "Выберите кластер:"
     local i=1
-    # Читаем файл, игнорируем строки, начинающиеся с '#'
     while read -r line; do
         if [[ "$line" =~ ^# ]]; then
             continue
@@ -39,7 +51,6 @@ select_cluster() {
         i=$((i+1))
     done < "$CONFIG_FILE"
     read -rp "Введите номер кластера: " cluster_number
-    # Снова читаем файл для получения данных, игнорируя комментарии
     local selected_line=$(awk 'NF && $1 !~ /^#/ {print NR" "$0}' "$CONFIG_FILE" | awk -v num="$cluster_number" '$1 == num {print $2,$3}')
     if [ -z "$selected_line" ]; then
         echo_color "Неверный выбор кластера. Попробуйте снова."
@@ -54,9 +65,7 @@ select_cluster() {
 # Функция для выбора namespace
 select_namespace() {
     echo_color "Доступные проекты:"
-    # Получаем список доступных проектов и обрабатываем его
-    oc projects 2>>$ERROR_LOG | sed -e '1,2d' -e '/^$/d' -e '$d' | awk '{print $1}' | sed 's/^\*//' > available_projects.txt
-    if [ ! -s available_projects.txt ]; then
+    if ! execute_command "oc projects | sed -e '1,2d' -e '/^$/d' -e '$d' | awk '{print \$1}' | sed 's/^\*//'" > available_projects.txt; then
         echo_color "Ошибка: Не удалось получить список проектов или список проектов пуст. Проверьте $ERROR_LOG для подробностей."
         exit 1
     fi
