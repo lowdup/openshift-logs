@@ -34,22 +34,49 @@ select_cluster() {
         ((i++))
     done < "$CONFIG_FILE"
     read -rp "Введите номер кластера: " cluster_number
-    if [ -z "${clusters[$((cluster_number-1))]}" ]; then
+    cluster_number=$((cluster_number-1))
+
+    if [ -z "${clusters[$cluster_number]}" ]; then
         echo_color "Неверный выбор кластера. Попробуйте снова."
         select_cluster
     else
-        SERVER_URL=$(echo "${clusters[$((cluster_number-1))]}" | cut -d' ' -f1)
-        TOKEN=$(echo "${clusters[$((cluster_number-1))]}" | cut -d' ' -f2)
-        if ! oc_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
-            echo_color "Авторизация не удалась. Попробуйте снова."
-            exit 1
+        local cluster_info=(${clusters[$cluster_number]})
+        SERVER_URL="${cluster_info[0]}"
+        TOKEN="${cluster_info[1]}"
+
+        if [[ -z "$TOKEN" || ! oc_command "oc login --token='$TOKEN' --server='$SERVER_URL' --insecure-skip-tls-verify=true" ]]; then
+            echo_color "Авторизация по токену не удалась или токен отсутствует. Попробуйте логин и пароль."
+            read -rp "Введите ваш логин: " username
+            read -rsp "Введите ваш пароль: " password
+            echo
+            if oc_command "oc login -u '$username' -p '$password' --server='$SERVER_URL' --insecure-skip-tls-verify=true"; then
+                new_token=$(oc whoami -t)
+                if [ -n "$new_token" ]; then
+                    echo_color "Токен успешно получен."
+                    # Обновляем или добавляем токен в конфигурационный файл
+                    if [ -z "${cluster_info[1]}" ]; then
+                        # Добавляем новый токен, если ранее токен отсутствовал
+                        sed -i "$((cluster_number+1))s|.*|$SERVER_URL $new_token|" "$CONFIG_FILE"
+                    else
+                        # Обновляем существующий токен
+                        sed -i "$((cluster_number+1))s|.*|$SERVER_URL $new_token|" "$CONFIG_FILE"
+                    fi
+                    echo_color "Токен успешно обновлен в конфигурационном файле."
+                else
+                    echo_color "Не удалось получить новый токен."
+                    exit 1
+                fi
+            else
+                echo_color "Авторизация не удалась. Проверьте логин и пароль и попробуйте снова."
+                exit 1
+            fi
         fi
     fi
 }
 
 select_namespace() {
     echo_color "Доступные проекты:"
-    local projects=$(oc_command "oc projects -q")
+    local projects=$(oc_command "oc projects -q" | awk '{print $1}')
     local project_list=($projects)
     if [ ${#project_list[@]} -eq 0 ]; then
         echo_color "Проекты не найдены."
@@ -80,38 +107,59 @@ request_log_time() {
 
 fetch_logs() {
     for ns in $NAMESPACES; do
-        echo_color "Работаем в namespace: $ns"
-        local pods=$(oc_command "oc get pods -n $ns --no-headers | awk '{print $1}'")
+        echo_color "\e[1;36mРаботаем в namespace: $ns\e[0m"
+        local pods
+        IFS=$'\n' read -d '' -ra pods < <(oc_command "oc get pods -n $ns --no-headers | awk '{print $1}'" && printf '\0')
+        if [ ${#pods[@]} -eq 0 ]; then
+            echo_color "\e[1;31mВ namespace $ns не найдено подов.\e[0m"
+            continue
+        fi
         echo "$pods" | nl -w1 -s') '
         echo "Введите номера подов (разделенных запятыми) или 0 для всех:"
         read -rp "Ваш выбор: " pod_choices
         local selected_pods=()
         if [[ "$pod_choices" == "0" ]]; then
-            selected_pods=($pods)
+            selected_pods=("${pods[@]}")
         else
             IFS=',' read -ra chosen_indices <<< "$pod_choices"
             for index in "${chosen_indices[@]}"; do
-                selected_pods+=("${pods[index-1]}")
+                ((index--))  # Adjust index to be zero-based
+                if [[ index -ge 0 && index -lt ${#pods[@]} ]]; then
+                    selected_pods+=("${pods[index]}")
+                else
+                    echo_color "\e[1;31mНекорректный индекс: $((index + 1)). Под не найден.\e[0m"
+                fi
             done
         fi
 
         request_log_time
 
         for pod in "${selected_pods[@]}"; do
-            local containers=$(oc_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
+            echo_color "\e[1;33mЗагружаем список контейнеров в поде $pod...\e[0m"
+            local containers
+            containers=$(oc_command "oc get pod $pod -n $ns -o jsonpath='{.spec.containers[*].name}'")
+            if [ -z "$containers" ]; then
+                echo_color "\e[1;31mВ поде $pod не найдено контейнеров.\e[0m"
+                continue
+            fi
+            echo_color "\e[1;32mНайдены контейнеры в поде $pod: $containers\e[0m"
+            
             for container in $containers; do
                 local timestamp=$(date "+%Y%m%d-%H%M%S")
                 local log_path="./logs/$ns/$pod/$container-$timestamp.log"
                 mkdir -p "$(dirname "$log_path")"
+                echo_color "\e[1;34mЗагрузка логов для $container...\e[0m"
                 if oc_command "oc logs $pod -c $container -n $ns $SINCE_TIME > $log_path"; then
-                    echo_color "Логи сохранены: $log_path"
+                    echo_color "\e[1;32mЛоги сохранены: $log_path\e[0m"
                 else
+                    echo_color "\e[1;31mОшибка при загрузке логов для $container в $pod.\e[0m"
                     log_error "Ошибка при загрузке логов для $container в $pod."
                 fi
             done
         done
     done
 }
+
 
 echo_color "Начало работы скрипта OpenShift Tools"
 select_cluster
