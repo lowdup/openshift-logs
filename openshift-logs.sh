@@ -14,11 +14,16 @@ log_error() {
 
 oc_command() {
     local command=$1
+    local temp_output=$(mktemp)  # Создаем временный файл для хранения вывода
+    eval "$command" > "$temp_output" 2>&1  # Выполняем команду и записываем вывод в файл
+
     if [ "$DEBUG" -eq 1 ]; then
-        eval "$command"
-    else
-        eval "$command" 2>&1 | tee -a $ERROR_LOG >/dev/null
+        cat "$temp_output"  # Выводим содержимое временного файла в консоль, если DEBUG включен
     fi
+
+    cat "$temp_output" >> $ERROR_LOG  # Добавляем вывод в лог-файл
+    cat "$temp_output"  # Возвращаем содержимое временного файла для использования в скрипте
+    rm "$temp_output"  # Удаляем временный файл
 }
 
 select_cluster() {
