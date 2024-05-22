@@ -35,7 +35,11 @@ get_all_namespaces() {
 # Функция для выбора кластера
 choose_cluster() {
   log "Выбор кластера"
-  mapfile -t clusters < <(cut -d: -f1 "$CONFIG_FILE")
+  clusters=()
+  while IFS=: read -r cluster token; do
+    clusters+=("$cluster")
+  done < "$CONFIG_FILE"
+  
   for i in "${!clusters[@]}"; do
     echo "$((i+1)). ${clusters[$i]}"
   done
@@ -193,7 +197,7 @@ clean_namespace() {
   actions_menu
 }
 
-# Запуск скрипт
+# Запуск скрипта
 choose_cluster
 choose_namespace
 actions_menu
