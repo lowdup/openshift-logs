@@ -57,9 +57,20 @@ choose_cluster() {
 get_all_namespaces() {
     color_text "light_blue" "Получение списка namespaces со всех кластеров..."
     namespaces=()
+    login_required=false
     while IFS= read -r line; do
         IFS='=' read -r cluster_url token <<< "$line"
-        oc login --token="$token" --server="$cluster_url" &>/dev/null
+        if [[ -z "$token" || "$login_required" == true ]]; then
+            login_to_cluster "$cluster_url" "$line"
+            login_required=false
+        else
+            oc login --token="$token" --server="$cluster_url" &>/dev/null
+            if [[ $? -ne 0 ]]; then
+                color_text "red" "Токен недействителен для $(color_text "cyan" "$cluster_url"). Пожалуйста, авторизуйтесь."
+                login_to_cluster "$cluster_url" "$line"
+                login_required=false
+            fi
+        fi
         if [[ $? -eq 0 ]]; then
             cluster_namespaces=$(oc projects -q)
             for ns in $cluster_namespaces; do
@@ -67,6 +78,7 @@ get_all_namespaces() {
             done
         else
             color_text "red" "Не удалось подключиться к $(color_text "cyan" "$cluster_url")"
+            login_required=true
         fi
     done < "$CLUSTERS_FILE"
 
@@ -91,14 +103,14 @@ get_all_namespaces() {
 # Функция для авторизации в кластере
 login_to_cluster() {
     cluster_url="$1"
-    cluster_index="$2"
+    cluster_line="$2"
     read -p "Введите логин: " username
     read -sp "Введите пароль: " password
     echo
     oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
     if [[ $? -eq 0 ]]; then
         token=$(oc whoami -t)
-        update_cluster_token "$cluster_url" "$token" "$cluster_index"
+        update_cluster_token "$cluster_url" "$token" "$cluster_line"
         color_text "green" "Успешная авторизация."
     else
         color_text "red" "Не удалось авторизоваться."
@@ -110,9 +122,13 @@ login_to_cluster() {
 update_cluster_token() {
     cluster_url="$1"
     token="$2"
-    cluster_index="$3"
+    cluster_line="$3"
     clusters=($(cat "$CLUSTERS_FILE"))
-    clusters[$cluster_index]="$cluster_url=$token"
+    for i in "${!clusters[@]}"; do
+        if [[ "${clusters[$i]}" == "$cluster_line" ]]; then
+            clusters[$i]="$cluster_url=$token"
+        fi
+    done
     printf "%s\n" "${clusters[@]}" > "$CLUSTERS_FILE"
 }
 
