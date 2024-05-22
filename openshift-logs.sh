@@ -72,7 +72,7 @@ get_all_namespaces() {
     for i in "${!namespaces[@]}"; do
         index=$((i+1))
         IFS=':' read -r cluster_url ns <<< "${namespaces[$i]}"
-        cluster_url_clean=$(echo "$cluster_url" | sed 's|https://||')
+        cluster_url_clean=$(echo "$cluster_url" | sed 's|https://||' | sed 's|/.*||')
         color_text "green" "$index) $ns (Кластер: $cluster_url_clean)"
     done
     read -p "Введите номер namespace для подключения или 'back' для возврата к выбору кластера: " ns_index
