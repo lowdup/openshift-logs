@@ -3,6 +3,9 @@
 # Файл со списком кластеров
 CLUSTERS_FILE="clusters.txt"
 
+# Список ресурсов для работы
+RESOURCES=(dc gw svc route deploy se vs dr cm EnvoyFilter secret)
+
 # Функция для окрашивания текста
 color_text() {
     case $1 in
@@ -10,6 +13,8 @@ color_text() {
         "green") echo -e "\e[32m$2\e[0m" ;;
         "yellow") echo -e "\e[33m$2\e[0m" ;;
         "blue") echo -e "\e[34m$2\e[0m" ;;
+        "cyan") echo -e "\e[36m$2\e[0m" ;;
+        "magenta") echo -e "\e[35m$2\e[0m" ;;
         *) echo "$2" ;;
     esac
 }
@@ -53,7 +58,7 @@ get_all_namespaces() {
         IFS='=' read -r cluster_url token <<< "$line"
         oc login --token="$token" --server="$cluster_url" &>/dev/null
         if [[ $? -eq 0 ]]; then
-            oc get ns
+            oc projects -q
         else
             color_text "red" "Не удалось подключиться к $cluster_url"
         fi
@@ -150,7 +155,7 @@ export_logs() {
     selected_containers=()
     for pod in "${selected_pods[@]}"; do
         mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n')
-        color_text "yellow" "Контейнеры в поде $pod:"
+        color_text "yellow" "Контейнеры в поде $(color_text "cyan" "$pod"):"
         for i in "${!containers[@]}"; do
             index=$((i+1))
             color_text "green" "$index) ${containers[$i]}"
@@ -174,8 +179,9 @@ export_logs() {
     mkdir -p "$log_dir"
     for container in "${selected_containers[@]}"; do
         IFS=':' read -r pod container_name <<< "$container"
+        color_text "blue" "Под: $(color_text "cyan" "$pod")"
         oc logs "$pod" -c "$container_name" -n "$namespace" --since="$since_time" > "$log_dir/${pod}_${container_name}.log"
-        color_text "green" "Логи сохранены в $log_dir/${pod}_${container_name}.log"
+        color_text "green" "Логи ${container_name} сохранены в $log_dir/${pod}_${container_name}.log"
     done
 }
 
@@ -186,7 +192,7 @@ download_configs() {
     color_text "yellow" "Скачивание конфигураций..."
     backup_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$backup_dir"
-    for resource in dc gw svc route deploy se vs dr cm EnvoyFilter secret; do
+    for resource in "${RESOURCES[@]}"; do
         oc get "$resource" -n "$namespace" -o yaml > "$backup_dir/${resource}.yaml"
     done
     color_text "green" "Конфигурации сохранены в $backup_dir"
@@ -208,7 +214,7 @@ restore_configs() {
 clear_namespace() {
     namespace="$1"
     color_text "yellow" "Очистка namespace $namespace..."
-    for resource in dc gw svc route deploy se vs dr cm EnvoyFilter secret; do
+    for resource in "${RESOURCES[@]}"; do
         oc delete "$resource" -n "$namespace" --all
     done
     color_text "green" "Namespace $namespace очищен."
