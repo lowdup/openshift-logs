@@ -61,7 +61,7 @@ get_all_namespaces() {
         if [[ $? -eq 0 ]]; then
             cluster_namespaces=$(oc projects -q)
             for ns in $cluster_namespaces; do
-                namespaces+=("$cluster_url:$ns")
+                namespaces+=("${cluster_url}=${ns}")
             done
         else
             color_text "red" "Не удалось подключиться к $cluster_url"
@@ -71,8 +71,8 @@ get_all_namespaces() {
     color_text "yellow" "Найдены namespaces:"
     for i in "${!namespaces[@]}"; do
         index=$((i+1))
-        IFS=':' read -r cluster_url ns <<< "${namespaces[$i]}"
-        cluster_url_clean=$(echo "$cluster_url" | sed 's|https://||' | sed 's|/.*||')
+        IFS='=' read -r cluster_url ns <<< "${namespaces[$i]}"
+        cluster_url_clean=$(echo "$cluster_url" | sed 's|https://||')
         color_text "green" "$index) $ns (Кластер: $cluster_url_clean)"
     done
     read -p "Введите номер namespace для подключения или 'back' для возврата к выбору кластера: " ns_index
@@ -81,7 +81,7 @@ get_all_namespaces() {
         choose_cluster
     else
         ns_index=$((ns_index-1))
-        IFS=':' read -r cluster_url namespace <<< "${namespaces[$ns_index]}"
+        IFS='=' read -r cluster_url namespace <<< "${namespaces[$ns_index]}"
         choose_action "$cluster_url" "$namespace"
     fi
 }
