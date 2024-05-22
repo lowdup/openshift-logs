@@ -32,12 +32,12 @@ choose_cluster() {
         IFS='=' read -r cluster_url token <<< "$cluster"
         if [[ -z "$token" ]]; then
             color_text "yellow" "Токен для $cluster_url не найден. Пожалуйста, авторизуйтесь."
-            login_to_cluster "$cluster_url"
+            login_to_cluster "$cluster_url" "$cluster_index"
         else
             oc login --token="$token" --server="$cluster_url" &>/dev/null
             if [[ $? -ne 0 ]]; then
                 color_text "red" "Токен недействителен. Пожалуйста, авторизуйтесь."
-                login_to_cluster "$cluster_url"
+                login_to_cluster "$cluster_url" "$cluster_index"
             fi
         fi
         choose_namespace "$cluster_url"
@@ -62,13 +62,14 @@ get_all_namespaces() {
 # Функция для авторизации в кластере
 login_to_cluster() {
     cluster_url="$1"
+    cluster_index="$2"
     read -p "Введите логин: " username
     read -sp "Введите пароль: " password
     echo
     oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
     if [[ $? -eq 0 ]]; then
         token=$(oc whoami -t)
-        update_cluster_token "$cluster_url" "$token"
+        update_cluster_token "$cluster_url" "$token" "$cluster_index"
         color_text "green" "Успешная авторизация."
     else
         color_text "red" "Не удалось авторизоваться."
@@ -80,11 +81,10 @@ login_to_cluster() {
 update_cluster_token() {
     cluster_url="$1"
     token="$2"
-    if grep -q "^$cluster_url=" "$CLUSTERS_FILE"; then
-        sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
-    else
-        echo "$cluster_url=$token" >> "$CLUSTERS_FILE"
-    fi
+    cluster_index="$3"
+    clusters=($(cat "$CLUSTERS_FILE"))
+    clusters[$cluster_index]="$cluster_url=$token"
+    printf "%s\n" "${clusters[@]}" > "$CLUSTERS_FILE"
 }
 
 # Функция для выбора namespace
