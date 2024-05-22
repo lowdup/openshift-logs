@@ -172,7 +172,7 @@ download_configs() {
     color_text "yellow" "Скачивание конфигураций..."
     backup_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$backup_dir"
-    for resource in configmap deployment service route pod rc daemonset replicaset job cronjob buildconfig imagestream pvc pv rolebinding role secret sa endpoint ds networkpolicy quota limitrange hpa policybinding scc network dns policy endpoint slice subscription gitrepository gitcr autoscale clustertask pipeline pipelinepatch clustertaskrun build controllerrevision taskrun vpa horizontalpodautoscaler poddisruptionbudget replicationcontroller statefulset resourcequota podtemplate clusterrole clusterrolebinding configmaplist deploymentlist deploymentconfiglist servicelist routelist podlist rclist daemonsetlist replicasetlist joblist cronjoblist buildconfiglist imagestreamlist pvclist pvlist rolebindinglist rolelist secretlist salist endpointlist dslist networkpolicylist quotalist limitrangelist hpalist policybindinglist scclist networklist dnslist policylist endpointlist slicelist subscriptionlist gitrepositorylist gitcrlist autoscalelist clustertasklist pipelinelist pipelinepatchlist clustertaskrunlist buildlist controllerrevisionlist taskrunlist vpalist horizontalpodautoscalerlist poddisruptionbudgetlist replicationcontrollerlist statefulsetlist resourcequotalist podtemplatelist clusterrolelist clusterrolebindinglist; do
+    for resource in dc gw svc route deploy se vs dr cm EnvoyFilter secret; do
         oc get "$resource" -n "$namespace" -o yaml > "$backup_dir/${resource}.yaml"
     done
     color_text "green" "Конфигурации сохранены в $backup_dir"
@@ -194,7 +194,7 @@ restore_configs() {
 clear_namespace() {
     namespace="$1"
     color_text "yellow" "Очистка namespace $namespace..."
-    for resource in dc gw svc route deploy se vs dr ef cm pod rc daemonset replicaset job cronjob buildconfig imagestream pvc pv rolebinding role secret sa endpoint ds networkpolicy quota limitrange hpa policybinding scc network dns policy endpoint slice subscription gitrepository gitcr autoscale clustertask pipeline pipelinepatch clustertaskrun build controllerrevision taskrun vpa horizontalpodautoscaler poddisruptionbudget replicationcontroller statefulset resourcequota podtemplate clusterrole clusterrolebinding configmaplist deploymentlist deploymentconfiglist servicelist routelist podlist rclist daemonsetlist replicasetlist joblist cronjoblist buildconfiglist imagestreamlist pvclist pvlist rolebindinglist rolelist secretlist salist endpointlist dslist networkpolicylist quotalist limitrangelist hpalist policybindinglist scclist networklist dnslist policylist endpointlist slicelist subscriptionlist gitrepositorylist gitcrlist autoscalelist clustertasklist pipelinelist pipelinepatchlist clustertaskrunlist buildlist controllerrevisionlist taskrunlist vpalist horizontalpodautoscalerlist poddisruptionbudgetlist replicationcontrollerlist statefulsetlist resourcequotalist podtemplatelist clusterrolelist clusterrolebindinglist; do
+    for resource in dc gw svc route deploy se vs dr cm EnvoyFilter secret; do
         oc delete "$resource" -n "$namespace" --all
     done
     color_text "green" "Namespace $namespace очищен."
