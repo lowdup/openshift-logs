@@ -1,194 +1,187 @@
 #!/bin/bash
 
-# Цвета
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Файл со списком кластеров
+CLUSTERS_FILE="clusters.txt"
 
-# Файл с кластерными данными
-CLUSTER_FILE="clusters.txt"
-
-# Функция для отображения меню
-show_menu() {
-    echo -e "${BLUE}Выберите действие:${NC}"
-    echo "1) Получить список namespace со всех кластеров"
-    echo "2) Выбрать кластер для работы"
-    echo "3) Выход"
-}
-
-# Функция для загрузки кластеров из файла
-load_clusters() {
-    clusters=()
-    while IFS= read -r line; do
-        clusters+=("$line")
-    done < "$CLUSTER_FILE"
+# Функция для окрашивания текста
+color_text() {
+    case $1 in
+        "red") echo -e "\e[31m$2\e[0m" ;;
+        "green") echo -e "\e[32m$2\e[0m" ;;
+        "yellow") echo -e "\e[33m$2\e[0m" ;;
+        "blue") echo -e "\e[34m$2\e[0m" ;;
+        *) echo "$2" ;;
+    esac
 }
 
 # Функция для выбора кластера
-select_cluster() {
-    echo -e "${BLUE}Выберите кластер для работы:${NC}"
+choose_cluster() {
+    color_text "yellow" "Выберите кластер из списка или введите 'all' для получения списка namespace со всех кластеров:"
+    mapfile -t clusters < "$CLUSTERS_FILE"
     for i in "${!clusters[@]}"; do
-        echo "$((i+1))) ${clusters[$i]}"
+        index=$((i+1))
+        color_text "green" "$index) ${clusters[$i]}"
     done
-    read -p "Введите номер кластера: " cluster_index
-    selected_cluster="${clusters[$((cluster_index-1))]}"
+    read -p "Введите номер кластера или 'all': " cluster_index
+
+    if [[ "$cluster_index" == "all" ]]; then
+        get_all_namespaces
+    else
+        cluster_index=$((cluster_index-1))
+        cluster="${clusters[$cluster_index]}"
+        IFS='=' read -r cluster_url token <<< "$cluster"
+        if [[ -z "$token" ]]; then
+            color_text "yellow" "Токен для $cluster_url не найден. Пожалуйста, авторизуйтесь."
+            login_to_cluster "$cluster_url"
+        else
+            oc login --token="$token" --server="$cluster_url" &>/dev/null
+            if [[ $? -ne 0 ]]; then
+                color_text "red" "Токен недействителен. Пожалуйста, авторизуйтесь."
+                login_to_cluster "$cluster_url"
+            fi
+        fi
+        choose_namespace "$cluster_url"
+    fi
 }
 
 # Функция для получения списка namespace со всех кластеров
-list_all_namespaces() {
-    echo -e "${GREEN}Получаем список namespace со всех кластеров...${NC}"
-    for cluster in "${clusters[@]}"; do
-        cluster_url=$(echo "$cluster" | awk '{print $1}')
-        token=$(echo "$cluster" | awk '{print $2}')
-        if [ -n "$token" ]; then
-            oc login "$cluster_url" --token="$token" --insecure-skip-tls-verify &>/dev/null
+get_all_namespaces() {
+    color_text "blue" "Получение списка namespace со всех кластеров..."
+    while IFS= read -r line; do
+        IFS='=' read -r cluster_url token <<< "$line"
+        oc login --token="$token" --server="$cluster_url" &>/dev/null
+        if [[ $? -eq 0 ]]; then
+            oc get ns
         else
-            echo -e "${RED}Нет токена для кластера $cluster_url${NC}"
-            continue
+            color_text "red" "Не удалось подключиться к $cluster_url"
         fi
-        oc get namespaces --no-headers -o custom-columns=NAME:.metadata.name
-    done
+    done < "$CLUSTERS_FILE"
+    exit 0
 }
 
 # Функция для авторизации в кластере
-authenticate_cluster() {
-    cluster_url=$(echo "$selected_cluster" | awk '{print $1}')
-    token=$(echo "$selected_cluster" | awk '{print $2}')
-    if [ -n "$token" ]; then
-        if ! oc login "$cluster_url" --token="$token" --insecure-skip-tls-verify &>/dev/null; then
-            echo -e "${YELLOW}Токен недействителен или истек. Пожалуйста, авторизуйтесь с помощью логина и пароля.${NC}"
-            oc login "$cluster_url" --insecure-skip-tls-verify
-            new_token=$(oc whoami -t)
-            sed -i "s|$selected_cluster|$cluster_url $new_token|" "$CLUSTER_FILE"
-        fi
+login_to_cluster() {
+    cluster_url="$1"
+    read -p "Введите логин: " username
+    read -sp "Введите пароль: " password
+    echo
+    oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
+    if [[ $? -eq 0 ]]; then
+        token=$(oc whoami -t)
+        sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
+        color_text "green" "Успешная авторизация."
     else
-        oc login "$cluster_url" --insecure-skip-tls-verify
-        new_token=$(oc whoami -t)
-        sed -i "s|$selected_cluster|$cluster_url $new_token|" "$CLUSTER_FILE"
+        color_text "red" "Не удалось авторизоваться."
+        exit 1
     fi
 }
 
-# Функция для получения списка namespace в выбранном кластере
-select_namespace() {
-    namespaces=($(oc get namespaces --no-headers -o custom-columns=NAME:.metadata.name))
-    echo -e "${BLUE}Выберите namespace для работы:${NC}"
+# Функция для выбора namespace
+choose_namespace() {
+    cluster_url="$1"
+    color_text "yellow" "Получение списка проектов..."
+    mapfile -t namespaces < <(oc projects -q)
     for i in "${!namespaces[@]}"; do
-        echo "$((i+1))) ${namespaces[$i]}"
+        index=$((i+1))
+        color_text "green" "$index) ${namespaces[$i]}"
     done
-    read -p "Введите номер namespace: " namespace_index
-    selected_namespace="${namespaces[$((namespace_index-1))]}"
+    read -p "Введите номер проекта: " namespace_index
+    namespace_index=$((namespace_index-1))
+    namespace="${namespaces[$namespace_index]}"
+    choose_action "$cluster_url" "$namespace"
 }
 
-# Функция для получения списка подов и контейнеров и выгрузки логов
+# Функция для выбора действия с namespace
+choose_action() {
+    cluster_url="$1"
+    namespace="$2"
+    while true; do
+        color_text "yellow" "Выберите действие для проекта $namespace:"
+        options=("Выгрузить логи" "Скачать конфигурации" "Восстановить конфигурации" "Очистить namespace" "Вернуться к выбору кластера" "Выход")
+        select opt in "${options[@]}"; do
+            case $REPLY in
+                1) export_logs "$cluster_url" "$namespace"; break ;;
+                2) download_configs "$cluster_url" "$namespace"; break ;;
+                3) restore_configs "$cluster_url" "$namespace"; break ;;
+                4) clear_namespace "$namespace"; break ;;
+                5) choose_cluster; break ;;
+                6) exit 0 ;;
+                *) color_text "red" "Неверный выбор." ;;
+            esac
+        done
+    done
+}
+
+# Функция для выгрузки логов
 export_logs() {
-    pods=($(oc get pods -n "$selected_namespace" --no-headers -o custom-columns=NAME:.metadata.name))
-    echo -e "${BLUE}Выберите под для выгрузки логов:${NC}"
+    cluster_url="$1"
+    namespace="$2"
+    color_text "yellow" "Получение списка подов..."
+    mapfile -t pods < <(oc get pods -n "$namespace" -o custom-columns=NAME:.metadata.name --no-headers)
     for i in "${!pods[@]}"; do
-        echo "$((i+1))) ${pods[$i]}"
+        index=$((i+1))
+        color_text "green" "$index) ${pods[$i]}"
     done
     read -p "Введите номер пода: " pod_index
-    selected_pod="${pods[$((pod_index-1))]}"
-
-    containers=($(oc get pods "$selected_pod" -n "$selected_namespace" -o jsonpath='{.spec.containers[*].name}'))
-    echo -e "${BLUE}Выберите контейнер для выгрузки логов:${NC}"
+    pod_index=$((pod_index-1))
+    pod="${pods[$pod_index]}"
+    mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}')
     for i in "${!containers[@]}"; do
-        echo "$((i+1))) ${containers[$i]}"
+        index=$((i+1))
+        color_text "green" "$index) ${containers[$i]}"
     done
     read -p "Введите номер контейнера: " container_index
-    selected_container="${containers[$((container_index-1))]}"
-
-    echo -e "${BLUE}За какое время нужны логи?${NC}"
-    echo "1) За последние 10 минут"
-    echo "2) За последние 30 минут"
-    echo "3) За последние 60 минут"
-    echo "4) Все логи"
-    read -p "Введите номер: " time_choice
-
-    case $time_choice in
-        1) since_time="10m" ;;
-        2) since_time="30m" ;;
-        3) since_time="60m" ;;
-        4) since_time="" ;;
-        *) echo -e "${RED}Неверный выбор${NC}"; return ;;
-    esac
-
-    log_dir="${cluster_url//[:\/]/_}/${selected_namespace}/log/$(date +%Y%m%d_%H%M%S)"
+    container_index=$((container_index-1))
+    container="${containers[$container_index]}"
+    read -p "Введите время для логов (например 30m, 1h): " since_time
+    log_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/log/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$log_dir"
-    if [ -n "$since_time" ]; then
-        oc logs "$selected_pod" -c "$selected_container" -n "$selected_namespace" --since="$since_time" > "$log_dir/${selected_pod}_${selected_container}.log"
-    else
-        oc logs "$selected_pod" -c "$selected_container" -n "$selected_namespace" > "$log_dir/${selected_pod}_${selected_container}.log"
-    fi
-    echo -e "${GREEN}Логи сохранены в $log_dir/${selected_pod}_${selected_container}.log${NC}"
+    oc logs "$pod" -c "$container" -n "$namespace" --since="$since_time" > "$log_dir/${pod}_${container}.log"
+    color_text "green" "Логи сохранены в $log_dir/${pod}_${container}.log"
 }
 
 # Функция для скачивания конфигураций
-backup_configs() {
-    config_dir="${cluster_url//[:\/]/_}/${selected_namespace}/backup/$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$config_dir"
-    resources=("configmaps" "deployments" "services" "routes" "secrets")
-    for resource in "${resources[@]}"; do
-        oc get "$resource" -n "$selected_namespace" -o yaml > "$config_dir/$resource.yaml"
+download_configs() {
+    cluster_url="$1"
+    namespace="$2"
+    color_text "yellow" "Скачивание конфигураций..."
+    backup_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    for resource in configmap deployment service route; do
+        oc get "$resource" -n "$namespace" -o yaml > "$backup_dir/${resource}.yaml"
     done
-    echo -e "${GREEN}Конфигурации сохранены в $config_dir${NC}"
+    color_text "green" "Конфигурации сохранены в $backup_dir"
 }
 
 # Функция для восстановления конфигураций
 restore_configs() {
-    echo -e "${BLUE}Введите путь к директории с бэкапом:${NC}"
-    read -p "Путь: " backup_dir
+    cluster_url="$1"
+    namespace="$2"
+    color_text "yellow" "Восстановление конфигураций..."
+    read -p "Введите путь к директории с бэкапом: " backup_dir
     for file in "$backup_dir"/*.yaml; do
-        oc apply -f "$file" -n "$selected_namespace"
+        oc apply -f "$file" -n "$namespace"
     done
-    echo -e "${GREEN}Конфигурации восстановлены из $backup_dir${NC}"
+    color_text "green" "Конфигурации восстановлены из $backup_dir"
 }
 
 # Функция для очистки namespace
 clear_namespace() {
-    echo -e "${YELLOW}Очистка namespace $selected_namespace...${NC}"
-    resources=("dc" "gw" "svc" "route" "deploy" "se" "vs" "dr" "ef" "cm")
-    for resource in "${resources[@]}"; do
-        oc delete "$resource" --all -n "$selected_namespace"
+    namespace="$1"
+    color_text "yellow" "Очистка namespace $namespace..."
+    for resource in dc gw svc route deploy se vs dr ef cm; do
+        oc delete "$resource" -n "$namespace" --all
     done
-    echo -e "${GREEN}Namespace $selected_namespace очищен${NC}"
+    color_text "green" "Namespace $namespace очищен."
 }
 
-# Основная логика скрипта
+# Основная функция
 main() {
-    load_clusters
-    while true; do
-        show_menu
-        read -p "Введите номер действия: " action
-        case $action in
-            1) list_all_namespaces ;;
-            2)
-                select_cluster
-                authenticate_cluster
-                select_namespace
-                while true; do
-                    echo -e "${BLUE}Выберите действие для namespace ${selected_namespace}:${NC}"
-                    echo "1) Выгрузить логи"
-                    echo "2) Скачать конфигурации"
-                    echo "3) Восстановить конфигурации"
-                    echo "4) Очистить namespace"
-                    echo "5) Вернуться к выбору кластера"
-                    read -p "Введите номер действия: " ns_action
-                    case $ns_action in
-                        1) export_logs ;;
-                        2) backup_configs ;;
-                        3) restore_configs ;;
-                        4) clear_namespace ;;
-                        5) break ;;
-                        *) echo -e "${RED}Неверный выбор${NC}" ;;
-                    esac
-                done
-                ;;
-            3) exit 0 ;;
-            *) echo -e "${RED}Неверный выбор${NC}" ;;
-        esac
-    done
+    if [[ ! -f "$CLUSTERS_FILE" ]]; then
+        color_text "red" "Файл $CLUSTERS_FILE не найден."
+        exit 1
+    fi
+    choose_cluster
 }
 
 main
