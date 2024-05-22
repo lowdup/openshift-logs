@@ -181,7 +181,7 @@ export_logs() {
             color_text "green" "$index) ${containers[$i]}"
         done
         read -p "Введите номера контейнеров через запятую или 'all' для выбора всех контейнеров в поде $pod: " container_indices
-        if [[ "$container_indices" == "all" || -з "$container_indices" ]]; then
+        if [[ "$container_indices" == "all" || -z "$container_indices" ]]; then
             for container in "${containers[@]}"; do
                 selected_containers+=("$pod:$container")
             done
@@ -200,11 +200,10 @@ export_logs() {
     for container in "${selected_containers[@]}"; do
         IFS=':' read -r pod container_name <<< "$container"
         color_text "magenta" "Под: $(color_text "cyan" "$pod")"
+        log_file="$log_dir/${pod}_${container_name}.txt"
         if [[ "$since_time" == "all" ]]; then
-            log_file="$log_dir/${pod}_${container_name}.txt"
             oc logs "$pod" -c "$container_name" -n "$namespace" > "$log_file"
         else
-            log_file="$log_dir/${pod}_${container_name}.txt"
             oc logs "$pod" -c "$container_name" -n "$namespace" --since="$since_time" > "$log_file"
         fi
         log_size=$(du -h "$log_file" | cut -f1)
@@ -254,7 +253,7 @@ restore_configs() {
     backup_dir="${backups[$backup_index]}"
     for file in "$backup_dir"/*.yaml; do
         color_text "light_blue" "Восстановление $file..."
-        oc apply --overwrite=true -f "$file" -n "$namespace" 2>/dev/null
+        oc apply -f "$file" -n "$namespace" 2>/dev/null
     done
     color_text "green" "Конфигурации восстановлены из $backup_dir"
 }
