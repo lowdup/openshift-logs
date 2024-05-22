@@ -36,8 +36,8 @@ get_all_namespaces() {
 choose_cluster() {
   log "Выбор кластера"
   clusters=()
-  while IFS=: read -r cluster token; do
-    clusters+=("$cluster")
+  while IFS= read -r line; do
+    clusters+=("$line")
   done < "$CONFIG_FILE"
   
   for i in "${!clusters[@]}"; do
@@ -57,7 +57,9 @@ choose_cluster() {
     exit 1
   fi
 
-  token=$(grep "^$selected_cluster" "$CONFIG_FILE" | cut -d: -f2-)
+  token=$(echo "$selected_cluster" | cut -d: -f2-)
+  selected_cluster=$(echo "$selected_cluster" | cut -d: -f1)
+  
   if [[ -n "$token" ]]; then
     oc login --token="$token" --server="$selected_cluster" &> /dev/null
     if [[ $? -ne 0 ]]; then
@@ -148,7 +150,7 @@ export_logs() {
   if [[ "$container_choice" -le "${#containers[@]}" && "$container_choice" -gt 0 ]]; then
     selected_container=${containers[$((container_choice-1))]}
   else
-    echo -e "${RED}Некорректный выбор!${NC}"
+    echo -е "${RED}Некорректный выбор!${NC}"
     actions_menu
   fi
 
@@ -162,7 +164,7 @@ export_logs() {
   log_dir="$selected_cluster/$selected_namespace/log/$(date +"%Y%m%d_%H%M%S")"
   mkdir -p "$log_dir"
   oc logs "$selected_pod" -n "$selected_namespace" -c "$selected_container" $time_opt > "$log_dir/$selected_pod_$selected_container.log"
-  echo -e "${GREEN}Логи сохранены в $log_dir/${NC}"
+  echo -е "${GREEN}Логи сохранены в $log_dir/${NC}"
   actions_menu
 }
 
@@ -172,7 +174,7 @@ download_configs() {
   config_dir="$selected_cluster/$selected_namespace/backup/$(date +"%Y%m%d_%H%M%S")"
   mkdir -p "$config_dir"
   oc get all -n "$selected_namespace" -o yaml > "$config_dir/config.yaml"
-  echo -e "${GREEN}Конфигурации сохранены в $config_dir/${NC}"
+  echo -е "${GREEN}Конфигурации сохранены в $config_dir/${NC}"
   actions_menu
 }
 
@@ -182,9 +184,9 @@ restore_configs() {
   read -rp "Введите путь к файлу конфигураций: " config_file
   if [[ -f "$config_file" ]]; then
     oc apply -f "$config_file" -n "$selected_namespace"
-    echo -e "${GREEN}Конфигурации восстановлены из $config_file${NC}"
+    echo -е "${GREEN}Конфигурации восстановлены из $config_file${NC}"
   else
-    echo -e "${RED}Файл $config_file не найден!${NC}"
+    echo -е "${RED}Файл $config_file не найден!${NC}"
   fi
   actions_menu
 }
@@ -193,7 +195,7 @@ restore_configs() {
 clean_namespace() {
   log "Очистка namespace"
   oc delete all --all -n "$selected_namespace"
-  echo -e "${GREEN}Namespace очищен.${NC}"
+  echo -е "${GREEN}Namespace очищен.${NC}"
   actions_menu
 }
 
