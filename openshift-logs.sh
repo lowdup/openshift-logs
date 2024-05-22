@@ -57,42 +57,30 @@ choose_cluster() {
 get_all_namespaces() {
     color_text "light_blue" "Получение списка namespaces со всех кластеров..."
     namespaces=()
-    login_required=false
+    read -p "Введите логин: " username
+    read -sp "Введите пароль: " password
+    echo
     while IFS= read -r line; do
         IFS='=' read -r cluster_url token <<< "$line"
-        if [[ -z "$token" || "$login_required" == true ]]; then
-            if [[ -z "$username" || -z "$password" ]]; then
-                read -p "Введите логин: " username
-                read -sp "Введите пароль: " password
-                echo
-            fi
+        if [[ -z "$token" ]]; then
             oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
             if [[ $? -eq 0 ]]; then
                 token=$(oc whoami -t)
                 update_cluster_token "$cluster_url" "$token" "$line"
-                login_required=false
             else
                 color_text "red" "Не удалось авторизоваться для $(color_text "cyan" "$cluster_url"). Пропуск..."
-                login_required=true
                 continue
             fi
         else
             oc login --token="$token" --server="$cluster_url" &>/dev/null
             if [[ $? -ne 0 ]]; then
-                color_text "red" "Токен недействителен для $(color_text "cyan" "$cluster_url"). Пожалуйста, авторизуйтесь."
-                if [[ -z "$username" || -z "$password" ]]; then
-                    read -p "Введите логин: " username
-                    read -sp "Введите пароль: " password
-                    echo
-                fi
+                color_text "red" "Токен недействителен для $(color_text "cyan" "$cluster_url"). Использование логина и пароля."
                 oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
                 if [[ $? -eq 0 ]]; then
                     token=$(oc whoami -t)
                     update_cluster_token "$cluster_url" "$token" "$line"
-                    login_required=false
                 else
                     color_text "red" "Не удалось авторизоваться для $(color_text "cyan" "$cluster_url"). Пропуск..."
-                    login_required=true
                     continue
                 fi
             fi
