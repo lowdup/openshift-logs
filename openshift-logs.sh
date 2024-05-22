@@ -193,7 +193,7 @@ clean_namespace() {
   actions_menu
 }
 
-# Запуск скрипта
+# Запуск скрипт
 choose_cluster
 choose_namespace
 actions_menu
