@@ -1,155 +1,199 @@
 #!/bin/bash
 
-CONFIG_FILE="clusters.conf"
-ERROR_LOG="error_log.txt"
-DEBUG=0
+# Цвета для вывода текста
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-printf_color() {
-    printf "\e[1;34m%s\e[0m\n" "$1"
+# Функция для вывода сообщений
+log() {
+  echo -e "${BLUE}[$(date +"%Y-%m-%d %H:%M:%S")]${NC} $1"
 }
 
-log_error() {
-    printf "%s\n" "$1" >> "$ERROR_LOG"
-}
+# Проверка наличия необходимого файла
+CONFIG_FILE="clusters.txt"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  echo -e "${RED}Файл с кластерами $CONFIG_FILE не найден!${NC}"
+  exit 1
+fi
 
-oc_command() {
-    local command="$1"
-    eval "$command" 2>&1 | tee -a "$ERROR_LOG"
-}
-
-select_cluster() {
-    printf_color "Выберите кластер:"
-    local i=1
-    local clusters=()
-    while IFS= read -r line; do
-        [[ "$line" =~ ^# ]] && continue
-        clusters+=("$line")
-        printf "%d) %s\n" "$i" "$(echo "$line" | cut -d' ' -f1)"
-        ((i++))
-    done < "$CONFIG_FILE"
-    
-    local cluster_number index
-    read -rp "Введите номер кластера: " cluster_number
-    index=$((cluster_number - 1))
-
-    if [[ -z "${clusters[index]}" ]]; then
-        printf_color "Неверный выбор кластера. Попробуйте снова."
-        select_cluster
+# Функция для получения списка namespace со всех кластеров
+get_all_namespaces() {
+  log "Получение списка namespace со всех кластеров"
+  while IFS=: read -r cluster token; do
+    if [[ -n "$token" ]]; then
+      oc login --token="$token" --server="$cluster" &> /dev/null
     else
-        local cluster_info=(${clusters[index]})
-        local server_url="${cluster_info[0]}"
-        local token="${cluster_info[1]}"
-
-        if [[ -z "$token" ]] || ! oc_command "oc login --token='$token' --server='$server_url' --insecure-skip-tls-verify=true"; then
-            printf_color "Авторизация по токену не удалась или токен отсутствует. Попробуйте логин и пароль."
-            local username password
-            read -rp "Введите ваш логин: " username
-            read -rsp "Введите ваш пароль: " password
-            echo
-            if oc_command "oc login -u '$username' -p '$password' --server='$server_url' --insecure-skip-tls-verify=true"; then
-                local new_token=$(oc_command "oc whoami -t")
-                if [[ -n "$new_token" ]]; then
-                    printf_color "Токен успешно получен и обновлен."
-                    clusters[index]="$server_url $new_token"
-                    printf "%s\n" "${clusters[@]}" > "$CONFIG_FILE"
-                    printf_color "Токен успешно обновлен в конфигурационном файле."
-                else
-                    printf_color "Не удалось получить новый токен."
-                    return 1
-                fi
-            else
-                printf_color "Авторизация не удалась. Проверьте логин и пароль и попробуйте снова."
-                return 1
-            fi
-        fi
+      echo -e "${YELLOW}Для кластера $cluster отсутствует токен.${NC}"
     fi
+    oc get namespaces --no-headers -o custom-columns=NAME:.metadata.name
+  done < "$CONFIG_FILE"
 }
 
-select_namespace() {
-    printf_color "Доступные проекты:"
-    local projects=$(oc_command "oc projects -q")
-    local project_list=($projects)
-    [[ ${#project_list[@]} -eq 0 ]] && { printf_color "Проекты не найдены."; return 1; }
+# Функция для выбора кластера
+choose_cluster() {
+  log "Выбор кластера"
+  mapfile -t clusters < <(cut -d: -f1 "$CONFIG_FILE")
+  for i in "${!clusters[@]}"; do
+    echo "$((i+1)). ${clusters[$i]}"
+  done
 
-    local i=1
-    for project in "${project_list[@]}"; do
-        printf "%d) %s\n" "$i" "$project"
-        ((i++))
-    done
-    local project_number
-    read -rp "Введите номер проекта: " project_number
-    NAMESPACES=${project_list[$((project_number-1))]}
+  read -rp "Введите номер кластера или 'a' для получения списка всех namespace: " choice
+  if [[ "$choice" == "a" ]]; then
+    get_all_namespaces
+    exit 0
+  fi
 
-    [[ -z "$NAMESPACES" ]] && { printf_color "Неверный выбор проекта. Попробуйте снова."; select_namespace; }
-}
+  if [[ "$choice" -le "${#clusters[@]}" && "$choice" -gt 0 ]]; then
+    selected_cluster=${clusters[$((choice-1))]}
+  else
+    echo -e "${RED}Некорректный выбор!${NC}"
+    exit 1
+  fi
 
-request_log_time() {
-    printf "Введите временной интервал (например, '1h' или '30m') или оставьте пустым для всех логов:\n"
-    read -rp "Временной интервал: " time_interval
-    [[ "$time_interval" =~ ^[0-9]+[hm]$ ]] && SINCE_TIME="--since=$time_interval" || SINCE_TIME=""
-}
-
-fetch_logs() {
-    for ns in $NAMESPACES; do
-        printf_color "Работаем в namespace: $ns"
-        local pods
-        mapfile -t pods < <(oc get pods -n "$ns" --no-headers | awk '{print $1}')
-        
-        [[ ${#pods[@]} -eq 0 ]] && { printf_color "В namespace $ns не найдено подов."; continue; }
-        printf "Доступные поды:\n"
-        printf '%s\n' "${pods[@]}" | nl -w1 -s') '
-        
-        printf "Введите номера подов (разделенных запятыми) или 0 для всех:\n"
-        local pod_choices selected_pods chosen_indices
-        read -rp "Ваш выбор: " pod_choices
-        if [[ "$pod_choices" == "0" ]]; then
-            selected_pods=("${pods[@]}")
-        else
-            IFS=',' read -ra chosen_indices <<< "$pod_choices"
-            for index in "${chosen_indices[@]}"; do
-                ((index--))  # Adjust index to be zero-based
-                if [[ index -ge 0 && index -lt ${#pods[@]} ]]; then
-                    selected_pods+=("${pods[index]}")
-                else
-                    printf_color "\e[1;31mНекорректный индекс: $((index + 1)). Под не найден.\e[0m"
-                fi
-            done
-        fi
-
-        request_log_time
-
-        for pod in "${selected_pods[@]}"; do
-            printf_color "\e[1;33mЗагружаем список контейнеров в поде $pod...\e[0m"
-            local containers
-            containers=$(oc get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[*].name}')
-            [[ -z "$containers" ]] && { printf_color "\e[1;31mВ поде $pod не найдено контейнеров.\e[0m"; continue; }
-            printf_color "\e[1;32mНайдены контейнеры в поде $pod: $containers\e[0m"
-            
-            for container in $containers; do
-                local timestamp log_path
-                timestamp=$(date "+%Y%m%d-%H%M%S")
-                log_path="./logs/$ns/$pod/$container-$timestamp.log"
-                mkdir -p "$(dirname "$log_path")"
-                printf_color "\e[1;34mЗагрузка логов для $container...\e[0m"
-                if oc logs "$pod" -c "$container" -n "$ns" $SINCE_TIME > "$log_path"; then
-                    printf_color "\e[1;32mЛоги сохранены: $log_path\e[0m"
-                else
-                    printf_color "\e[1;31mОшибка при загрузке логов для $container в $pod.\e[0m"
-                    log_error "Ошибка при загрузке логов для $container в $pod."
-                fi
-            done
-        done
-    done
-}
-
-main() {
-    printf_color "Начало работы скрипта OpenShift Tools"
-    if ! select_cluster || ! select_namespace; then
-        printf_color "Ошибка инициализации скрипта. Останавливаем выполнение."
-        return 1
+  token=$(grep "^$selected_cluster" "$CONFIG_FILE" | cut -d: -f2-)
+  if [[ -n "$token" ]]; then
+    oc login --token="$token" --server="$selected_cluster" &> /dev/null
+    if [[ $? -ne 0 ]]; then
+      echo -e "${YELLOW}Токен недействителен или истек.${NC}"
+      login_with_credentials "$selected_cluster"
     fi
-    fetch_logs
-    printf_color "Завершение работы скрипта OpenShift Tools"
+  else
+    login_with_credentials "$selected_cluster"
+  fi
 }
 
-main
+# Функция для логина с учетными данными
+login_with_credentials() {
+  local cluster=$1
+  read -rp "Введите логин: " login
+  read -rsp "Введите пароль: " password
+  echo
+  oc login --server="$cluster" -u "$login" -p "$password" &> /dev/null
+  if [[ $? -eq 0 ]]; then
+    token=$(oc whoami -t)
+    sed -i "s|^$cluster:.*|$cluster:$token|g" "$CONFIG_FILE"
+    echo -e "${GREEN}Авторизация успешна! Токен обновлен.${NC}"
+  else
+    echo -e "${RED}Ошибка авторизации!${NC}"
+    exit 1
+  fi
+}
+
+# Функция для выбора namespace
+choose_namespace() {
+  log "Выбор namespace"
+  mapfile -t namespaces < <(oc get namespaces --no-headers -o custom-columns=NAME:.metadata.name)
+  for i in "${!namespaces[@]}"; do
+    echo "$((i+1)). ${namespaces[$i]}"
+  done
+
+  read -rp "Введите номер namespace: " ns_choice
+  if [[ "$ns_choice" -le "${#namespaces[@]}" && "$ns_choice" -gt 0 ]]; then
+    selected_namespace=${namespaces[$((ns_choice-1))]}
+  else
+    echo -e "${RED}Некорректный выбор!${NC}"
+    exit 1
+  fi
+}
+
+# Функция для вывода меню действий
+actions_menu() {
+  log "Меню действий"
+  echo "1. Выгрузить логи"
+  echo "2. Скачать файлы конфигурации"
+  echo "3. Восстановить конфигурации из backup"
+  echo "4. Очистить namespace"
+  echo "5. Вернуться к выбору кластера"
+  read -rp "Выберите действие: " action_choice
+
+  case "$action_choice" in
+    1) export_logs ;;
+    2) download_configs ;;
+    3) restore_configs ;;
+    4) clean_namespace ;;
+    5) choose_cluster ;;
+    *) echo -e "${RED}Некорректный выбор!${NC}"; actions_menu ;;
+  esac
+}
+
+# Функция для выгрузки логов
+export_logs() {
+  log "Выгрузка логов"
+  mapfile -t pods < <(oc get pods -n "$selected_namespace" --no-headers -o custom-columns=NAME:.metadata.name)
+  for i in "${!pods[@]}"; do
+    echo "$((i+1)). ${pods[$i]}"
+  done
+
+  read -rp "Введите номер пода: " pod_choice
+  if [[ "$pod_choice" -le "${#pods[@]}" && "$pod_choice" -gt 0 ]]; then
+    selected_pod=${pods[$((pod_choice-1))]}
+  else
+    echo -e "${RED}Некорректный выбор!${NC}"
+    actions_menu
+  fi
+
+  mapfile -t containers < <(oc get pod "$selected_pod" -n "$selected_namespace" -o jsonpath='{.spec.containers[*].name}')
+  for i in "${!containers[@]}"; do
+    echo "$((i+1)). ${containers[$i]}"
+  done
+
+  read -rp "Введите номер контейнера: " container_choice
+  if [[ "$container_choice" -le "${#containers[@]}" && "$container_choice" -gt 0 ]]; then
+    selected_container=${containers[$((container_choice-1))]}
+  else
+    echo -e "${RED}Некорректный выбор!${NC}"
+    actions_menu
+  fi
+
+  read -rp "Введите время для логов (например, 10m, 30m, 1h, 2d или all): " log_time
+  if [[ "$log_time" == "all" ]]; then
+    time_opt=""
+  else
+    time_opt="--since=$log_time"
+  fi
+
+  log_dir="$selected_cluster/$selected_namespace/log/$(date +"%Y%m%d_%H%M%S")"
+  mkdir -p "$log_dir"
+  oc logs "$selected_pod" -n "$selected_namespace" -c "$selected_container" $time_opt > "$log_dir/$selected_pod_$selected_container.log"
+  echo -e "${GREEN}Логи сохранены в $log_dir/${NC}"
+  actions_menu
+}
+
+# Функция для скачивания конфигураций
+download_configs() {
+  log "Скачивание конфигураций"
+  config_dir="$selected_cluster/$selected_namespace/backup/$(date +"%Y%m%d_%H%M%S")"
+  mkdir -p "$config_dir"
+  oc get all -n "$selected_namespace" -o yaml > "$config_dir/config.yaml"
+  echo -e "${GREEN}Конфигурации сохранены в $config_dir/${NC}"
+  actions_menu
+}
+
+# Функция для восстановления конфигураций
+restore_configs() {
+  log "Восстановление конфигураций"
+  read -rp "Введите путь к файлу конфигураций: " config_file
+  if [[ -f "$config_file" ]]; then
+    oc apply -f "$config_file" -n "$selected_namespace"
+    echo -e "${GREEN}Конфигурации восстановлены из $config_file${NC}"
+  else
+    echo -e "${RED}Файл $config_file не найден!${NC}"
+  fi
+  actions_menu
+}
+
+# Функция для очистки namespace
+clean_namespace() {
+  log "Очистка namespace"
+  oc delete all --all -n "$selected_namespace"
+  echo -e "${GREEN}Namespace очищен.${NC}"
+  actions_menu
+}
+
+# Запуск скрипта
+choose_cluster
+choose_namespace
+actions_menu
