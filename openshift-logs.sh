@@ -68,7 +68,11 @@ login_to_cluster() {
     oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
     if [[ $? -eq 0 ]]; then
         token=$(oc whoami -t)
-        sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
+        if grep -q "^$cluster_url=" "$CLUSTERS_FILE"; then
+            sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
+        else
+            echo "$cluster_url=$token" >> "$CLUSTERS_FILE"
+        fi
         color_text "green" "Успешная авторизация."
     else
         color_text "red" "Не удалось авторизоваться."
@@ -122,22 +126,36 @@ export_logs() {
         index=$((i+1))
         color_text "green" "$index) ${pods[$i]}"
     done
-    read -p "Введите номер пода: " pod_index
-    pod_index=$((pod_index-1))
-    pod="${pods[$pod_index]}"
-    mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}')
-    for i in "${!containers[@]}"; do
-        index=$((i+1))
-        color_text "green" "$index) ${containers[$i]}"
+    read -p "Введите номера подов через запятую: " pod_indices
+    IFS=',' read -ra pod_indices_array <<< "$pod_indices"
+    selected_pods=()
+    for pod_index in "${pod_indices_array[@]}"; do
+        pod_index=$((pod_index-1))
+        selected_pods+=("${pods[$pod_index]}")
     done
-    read -p "Введите номер контейнера: " container_index
-    container_index=$((container_index-1))
-    container="${containers[$container_index]}"
-    read -p "Введите время для логов (например 30m, 1h): " since_time
-    log_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/log/$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$log_dir"
-    oc logs "$pod" -c "$container" -n "$namespace" --since="$since_time" > "$log_dir/${pod}_${container}.log"
-    color_text "green" "Логи сохранены в $log_dir/${pod}_${container}.log"
+
+    for pod in "${selected_pods[@]}"; do
+        mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}')
+        for i in "${!containers[@]}"; do
+            index=$((i+1))
+            color_text "green" "$index) ${containers[$i]}"
+        done
+        read -p "Введите номера контейнеров через запятую для пода $pod: " container_indices
+        IFS=',' read -ra container_indices_array <<< "$container_indices"
+        selected_containers=()
+        for container_index in "${container_indices_array[@]}"; do
+            container_index=$((container_index-1))
+            selected_containers+=("${containers[$container_index]}")
+        done
+
+        read -p "Введите время для логов (например 30m, 1h): " since_time
+        log_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/log/$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$log_dir"
+        for container in "${selected_containers[@]}"; do
+            oc logs "$pod" -c "$container" -n "$namespace" --since="$since_time" > "$log_dir/${pod}_${container}.log"
+            color_text "green" "Логи сохранены в $log_dir/${pod}_${container}.log"
+        done
+    done
 }
 
 # Функция для скачивания конфигураций
@@ -147,7 +165,7 @@ download_configs() {
     color_text "yellow" "Скачивание конфигураций..."
     backup_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$backup_dir"
-    for resource in configmap deployment service route; do
+    for resource in configmap deployment service route pod rc daemonset replicaset job cronjob buildconfig imagestream pvc pv rolebinding role secret sa endpoint ds networkpolicy quota limitrange hpa policybinding scc network dns policy endpoint slice subscription gitrepository gitcr autoscale clustertask pipeline pipelinepatch clustertaskrun build controllerrevision taskrun vpa horizontalpodautoscaler poddisruptionbudget replicationcontroller statefulset resourcequota podtemplate clusterrole clusterrolebinding configmaplist deploymentlist deploymentconfiglist servicelist routelist podlist rclist daemonsetlist replicasetlist joblist cronjoblist buildconfiglist imagestreamlist pvclist pvlist rolebindinglist rolelist secretlist salist endpointlist dslist networkpolicylist quotalist limitrangelist hpalist policybindinglist scclist networklist dnslist policylist endpointlist slicelist subscriptionlist gitrepositorylist gitcrlist autoscalelist clustertasklist pipelinelist pipelinepatchlist clustertaskrunlist buildlist controllerrevisionlist taskrunlist vpalist horizontalpodautoscalerlist poddisruptionbudgetlist replicationcontrollerlist statefulsetlist resourcequotalist podtemplatelist clusterrolelist clusterrolebindinglist; do
         oc get "$resource" -n "$namespace" -o yaml > "$backup_dir/${resource}.yaml"
     done
     color_text "green" "Конфигурации сохранены в $backup_dir"
@@ -169,7 +187,7 @@ restore_configs() {
 clear_namespace() {
     namespace="$1"
     color_text "yellow" "Очистка namespace $namespace..."
-    for resource in dc gw svc route deploy se vs dr ef cm; do
+    for resource in dc gw svc route deploy se vs dr ef cm pod rc daemonset replicaset job cronjob buildconfig imagestream pvc pv rolebinding role secret sa endpoint ds networkpolicy quota limitrange hpa policybinding scc network dns policy endpoint slice subscription gitrepository gitcr autoscale clustertask pipeline pipelinepatch clustertaskrun build controllerrevision taskrun vpa horizontalpodautoscaler poddisruptionbudget replicationcontroller statefulset resourcequota podtemplate clusterrole clusterrolebinding configmaplist deploymentlist deploymentconfiglist servicelist routelist podlist rclist daemonsetlist replicasetlist joblist cronjoblist buildconfiglist imagestreamlist pvclist pvlist rolebindinglist rolelist secretlist salist endpointlist dslist networkpolicylist quotalist limitrangelist hpalist policybindinglist scclist networklist dnslist policylist endpointlist slicelist subscriptionlist gitrepositorylist gitcrlist autoscalelist clustertasklist pipelinelist pipelinepatchlist clustertaskrunlist buildlist controllerrevisionlist taskrunlist vpalist horizontalpodautoscalerlist poddisruptionbudgetlist replicationcontrollerlist statefulsetlist resourcequotalist podtemplatelist clusterrolelist clusterrolebindinglist; do
         oc delete "$resource" -n "$namespace" --all
     done
     color_text "green" "Namespace $namespace очищен."
