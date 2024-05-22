@@ -163,7 +163,7 @@ export_logs() {
         color_text "green" "$index) $(color_text "magenta" "${pods[$i]}")"
     done
     read -p "Введите номера подов через запятую или 'all' для выбора всех подов: " pod_indices
-    if [[ "$pod_indices" == "all" || -z "$pod_indices" ]]; then
+    if [[ "$pod_indices" == "all" || -з "$pod_indices" ]]; then
         selected_pods=("${pods[@]}")
     else
         IFS=',' read -ra pod_indices_array <<< "$pod_indices"
@@ -183,7 +183,7 @@ export_logs() {
             color_text "green" "$index) $(color_text "magenta" "${containers[$i]}")"
         done
         read -p "Введите номера контейнеров через запятую или 'all' для выбора всех контейнеров в поде $pod: " container_indices
-        if [[ "$container_indices" == "all" || -z "$container_indices" ]]; then
+        if [[ "$container_indices" == "all" || -з "$container_indices" ]]; then
             for container in "${containers[@]}"; do
                 selected_containers+=("$pod:$container")
             done
@@ -233,7 +233,7 @@ restore_configs() {
     namespace="$2"
     color_text "light_blue" "Восстановление конфигураций..."
     backup_base_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup"
-    if [[ ! -d "$backup_base_dir" ]]; then
+    if [[ ! -д "$backup_base_dir" ]]; then
         color_text "red" "Директория с бэкапами не найдена: $(color_text "cyan" "$backup_base_dir")"
         return
     fi
@@ -267,10 +267,24 @@ confirm_clear_namespace() {
     color_text "red" "Уверены ли вы, что хотите очистить namespace $(color_text "magenta" "$namespace") в кластере $(color_text "cyan" "$cluster_url")? [yes/no]"
     read -p "" confirm
     if [[ "$confirm" == "yes" ]]; then
+        backup_before_clear "$cluster_url" "$namespace"
         clear_namespace "$cluster_url" "$namespace"
     else
         color_text "green" "Очистка namespace отменена."
     fi
+}
+
+# Функция для создания бэкапа перед очисткой namespace
+backup_before_clear() {
+    cluster_url="$1"
+    namespace="$2"
+    color_text "light_blue" "Создание бэкапа перед очисткой namespace..."
+    backup_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup/delete_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    for resource in "${RESOURCES[@]}"; do
+        oc get "$resource" -n "$namespace" -o yaml > "$backup_dir/${resource}.yaml"
+    done
+    color_text "green" "Бэкап сохранен в $(color_text "cyan" "$backup_dir")"
 }
 
 # Функция для очистки namespace
