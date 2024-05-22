@@ -12,22 +12,24 @@ color_text() {
         "red") echo -e "\e[31m$2\e[0m" ;;
         "green") echo -e "\e[32m$2\e[0m" ;;
         "yellow") echo -e "\e[33m$2\e[0m" ;;
-        "light_blue") echo -e "\e[36m$2\e[0m" ;;
+        "light_blue") echo -e "\e[96m$2\e[0m" ;;
+        "cyan") echo -e "\e[36m$2\e[0m" ;;
         "magenta") echo -e "\e[35m$2\e[0m" ;;
         "white") echo -e "\e[97m$2\e[0m" ;;
+        "bold") echo -e "\e[1m$2\e[0m" ;;
         *) echo "$2" ;;
     esac
 }
 
 # Функция для выбора кластера
 choose_cluster() {
-    color_text "yellow" "Выберите кластер из списка или введите 'all' для получения списка namespaces со всех кластеров:"
+    color_text "light_blue" "Выберите кластер из списка или введите 'all' для получения списка namespaces со всех кластеров:"
     mapfile -t clusters < "$CLUSTERS_FILE"
     for i in "${!clusters[@]}"; do
         index=$((i+1))
         cluster="${clusters[$i]}"
         cluster_url=$(echo "$cluster" | cut -d'=' -f1)
-        color_text "green" "$index) $cluster_url"
+        color_text "green" "$index) $(color_text "cyan" "$cluster_url")"
     done
     read -p "Введите номер кластера или 'all': " cluster_index
 
@@ -38,7 +40,7 @@ choose_cluster() {
         cluster="${clusters[$cluster_index]}"
         IFS='=' read -r cluster_url token <<< "$cluster"
         if [[ -z "$token" ]]; then
-            color_text "yellow" "Токен для $cluster_url не найден. Пожалуйста, авторизуйтесь."
+            color_text "light_blue" "Токен для $(color_text "cyan" "$cluster_url") не найден. Пожалуйста, авторизуйтесь."
             login_to_cluster "$cluster_url" "$cluster_index"
         else
             oc login --token="$token" --server="$cluster_url" &>/dev/null
@@ -64,16 +66,16 @@ get_all_namespaces() {
                 namespaces+=("${cluster_url}=${ns}")
             done
         else
-            color_text "red" "Не удалось подключиться к $cluster_url"
+            color_text "red" "Не удалось подключиться к $(color_text "cyan" "$cluster_url")"
         fi
     done < "$CLUSTERS_FILE"
 
-    color_text "yellow" "Найдены namespaces:"
+    color_text "light_blue" "Найдены namespaces:"
     for i in "${!namespaces[@]}"; do
         index=$((i+1))
         IFS='=' read -r cluster_url ns <<< "${namespaces[$i]}"
         cluster_url_clean=$(echo "$cluster_url" | sed 's|https://||')
-        color_text "green" "$index) $ns (Кластер: $cluster_url_clean)"
+        color_text "green" "$index) $(color_text "magenta" "$ns") (Кластер: $(color_text "cyan" "$cluster_url_clean"))"
     done
     read -p "Введите номер namespace для подключения или 'back' для возврата к выбору кластера: " ns_index
 
@@ -117,11 +119,11 @@ update_cluster_token() {
 # Функция для выбора namespace
 choose_namespace() {
     cluster_url="$1"
-    color_text "yellow" "Получение списка проектов..."
+    color_text "light_blue" "Получение списка проектов..."
     mapfile -t namespaces < <(oc projects -q)
     for i in "${!namespaces[@]}"; do
         index=$((i+1))
-        color_text "green" "$index) ${namespaces[$i]}"
+        color_text "green" "$index) $(color_text "magenta" "${namespaces[$i]}")"
     done
     read -p "Введите номер проекта: " namespace_index
     namespace_index=$((namespace_index-1))
@@ -134,7 +136,7 @@ choose_action() {
     cluster_url="$1"
     namespace="$2"
     while true; do
-        color_text "yellow" "Выберите действие для проекта $namespace:"
+        color_text "light_blue" "Выберите действие для проекта $(color_text "magenta" "$namespace"):"
         options=("Выгрузить логи" "Скачать конфигурации" "Восстановить конфигурации" "Очистить namespace" "Вернуться к выбору кластера" "Выход")
         select opt in "${options[@]}"; do
             case $REPLY in
@@ -154,11 +156,11 @@ choose_action() {
 export_logs() {
     cluster_url="$1"
     namespace="$2"
-    color_text "yellow" "Получение списка подов..."
+    color_text "light_blue" "Получение списка подов..."
     mapfile -t pods < <(oc get pods -n "$namespace" -o custom-columns=NAME:.metadata.name --no-headers)
     for i in "${!pods[@]}"; do
         index=$((i+1))
-        color_text "green" "$index) ${pods[$i]}"
+        color_text "green" "$index) $(color_text "magenta" "${pods[$i]}")"
     done
     read -p "Введите номера подов через запятую или 'all' для выбора всех подов: " pod_indices
     if [[ "$pod_indices" == "all" || -z "$pod_indices" ]]; then
@@ -175,10 +177,10 @@ export_logs() {
     selected_containers=()
     for pod in "${selected_pods[@]}"; do
         mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n')
-        color_text "yellow" "Контейнеры в поде $(color_text "cyan" "$pod"):"
+        color_text "light_blue" "Контейнеры в поде $(color_text "cyan" "$pod"):"
         for i in "${!containers[@]}"; do
             index=$((i+1))
-            color_text "green" "$index) ${containers[$i]}"
+            color_text "green" "$index) $(color_text "magenta" "${containers[$i]}")"
         done
         read -p "Введите номера контейнеров через запятую или 'all' для выбора всех контейнеров в поде $pod: " container_indices
         if [[ "$container_indices" == "all" || -z "$container_indices" ]]; then
@@ -207,7 +209,7 @@ export_logs() {
             oc logs "$pod" -c "$container_name" -n "$namespace" --since="$since_time" > "$log_file"
         fi
         log_size=$(du -h "$log_file" | cut -f1)
-        color_text "green" "Логи ${container_name} сохранены в $log_file (${log_size})"
+        color_text "green" "Логи $(color_text "magenta" "$container_name") сохранены в $(color_text "cyan" "$log_file") (${log_size})"
     done
 }
 
@@ -215,54 +217,54 @@ export_logs() {
 download_configs() {
     cluster_url="$1"
     namespace="$2"
-    color_text "yellow" "Скачивание конфигураций..."
+    color_text "light_blue" "Скачивание конфигураций..."
     backup_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$backup_dir"
     for resource in "${RESOURCES[@]}"; do
-        color_text "light_blue" "Скачивается $resource..."
+        color_text "light_blue" "Скачивается $(color_text "magenta" "$resource")..."
         oc get "$resource" -n "$namespace" -o yaml > "$backup_dir/${resource}.yaml"
     done
-    color_text "green" "Конфигурации сохранены в $backup_dir"
+    color_text "green" "Конфигурации сохранены в $(color_text "cyan" "$backup_dir")"
 }
 
 # Функция для восстановления конфигураций
 restore_configs() {
     cluster_url="$1"
     namespace="$2"
-    color_text "yellow" "Восстановление конфигураций..."
+    color_text "light_blue" "Восстановление конфигураций..."
     backup_base_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/backup"
     if [[ ! -d "$backup_base_dir" ]]; then
-        color_text "red" "Директория с бэкапами не найдена: $backup_base_dir"
+        color_text "red" "Директория с бэкапами не найдена: $(color_text "cyan" "$backup_base_dir")"
         return
     fi
 
     backups=($(ls -dt "$backup_base_dir"/* | head -n 10))
     if [[ ${#backups[@]} -eq 0 ]]; then
-        color_text "red" "Бэкапы не найдены в $backup_base_dir"
+        color_text "red" "Бэкапы не найдены в $(color_text "cyan" "$backup_base_dir")"
         return
     fi
 
-    color_text "yellow" "Выберите бэкап для восстановления:"
+    color_text "light_blue" "Выберите бэкап для восстановления:"
     for i in "${!backups[@]}"; do
         index=$((i+1))
-        color_text "green" "$index) ${backups[$i]}"
+        color_text "green" "$index) $(color_text "cyan" "${backups[$i]}")"
     done
     read -p "Введите номер бэкапа для восстановления: " backup_index
     backup_index=$((backup_index-1))
 
     backup_dir="${backups[$backup_index]}"
     for file in "$backup_dir"/*.yaml; do
-        color_text "light_blue" "Восстановление $file..."
+        color_text "light_blue" "Восстановление $(color_text "magenta" "$file")..."
         oc apply -f "$file" -n "$namespace" 2>/dev/null
     done
-    color_text "green" "Конфигурации восстановлены из $backup_dir"
+    color_text "green" "Конфигурации восстановлены из $(color_text "cyan" "$backup_dir")"
 }
 
 # Функция для подтверждения очистки namespace
 confirm_clear_namespace() {
     cluster_url="$1"
     namespace="$2"
-    color_text "red" "Уверены ли вы, что хотите очистить namespace $namespace в кластере $cluster_url? [yes/no]"
+    color_text "red" "Уверены ли вы, что хотите очистить namespace $(color_text "magenta" "$namespace") в кластере $(color_text "cyan" "$cluster_url")? [yes/no]"
     read -p "" confirm
     if [[ "$confirm" == "yes" ]]; then
         clear_namespace "$cluster_url" "$namespace"
@@ -275,17 +277,17 @@ confirm_clear_namespace() {
 clear_namespace() {
     cluster_url="$1"
     namespace="$2"
-    color_text "yellow" "Очистка namespace $namespace в кластере $cluster_url..."
+    color_text "light_blue" "Очистка namespace $(color_text "magenta" "$namespace") в кластере $(color_text "cyan" "$cluster_url")..."
     for resource in "${RESOURCES[@]}"; do
         oc delete "$resource" -n "$namespace" --all
     done
-    color_text "green" "Namespace $namespace очищен."
+    color_text "green" "Namespace $(color_text "magenta" "$namespace") очищен."
 }
 
 # Основная функция
 main() {
     if [[ ! -f "$CLUSTERS_FILE" ]]; then
-        color_text "red" "Файл $CLUSTERS_FILE не найден."
+        color_text "red" "Файл $(color_text "cyan" "$CLUSTERS_FILE") не найден."
         exit 1
     fi
     choose_cluster
