@@ -20,7 +20,9 @@ choose_cluster() {
     mapfile -t clusters < "$CLUSTERS_FILE"
     for i in "${!clusters[@]}"; do
         index=$((i+1))
-        color_text "green" "$index) ${clusters[$i]}"
+        cluster="${clusters[$i]}"
+        cluster_url=$(echo "$cluster" | cut -d'=' -f1)
+        color_text "green" "$index) $cluster_url"
     done
     read -p "Введите номер кластера или 'all': " cluster_index
 
@@ -133,35 +135,47 @@ export_logs() {
         index=$((i+1))
         color_text "green" "$index) ${pods[$i]}"
     done
-    read -p "Введите номера подов через запятую: " pod_indices
-    IFS=',' read -ra pod_indices_array <<< "$pod_indices"
-    selected_pods=()
-    for pod_index in "${pod_indices_array[@]}"; do
-        pod_index=$((pod_index-1))
-        selected_pods+=("${pods[$pod_index]}")
-    done
+    read -p "Введите номера подов через запятую или 'all' для выбора всех подов: " pod_indices
+    if [[ "$pod_indices" == "all" || -z "$pod_indices" ]]; then
+        selected_pods=("${pods[@]}")
+    else
+        IFS=',' read -ra pod_indices_array <<< "$pod_indices"
+        selected_pods=()
+        for pod_index in "${pod_indices_array[@]}"; do
+            pod_index=$((pod_index-1))
+            selected_pods+=("${pods[$pod_index]}")
+        done
+    fi
 
+    selected_containers=()
     for pod in "${selected_pods[@]}"; do
         mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n')
+        color_text "yellow" "Контейнеры в поде $pod:"
         for i in "${!containers[@]}"; do
             index=$((i+1))
             color_text "green" "$index) ${containers[$i]}"
         done
-        read -p "Введите номера контейнеров через запятую для пода $pod: " container_indices
-        IFS=',' read -ra container_indices_array <<< "$container_indices"
-        selected_containers=()
-        for container_index in "${container_indices_array[@]}"; do
-            container_index=$((container_index-1))
-            selected_containers+=("${containers[$container_index]}")
-        done
+        read -p "Введите номера контейнеров через запятую или 'all' для выбора всех контейнеров в поде $pod: " container_indices
+        if [[ "$container_indices" == "all" || -z "$container_indices" ]]; then
+            for container in "${containers[@]}"; do
+                selected_containers+=("$pod:$container")
+            done
+        else
+            IFS=',' read -ra container_indices_array <<< "$container_indices"
+            for container_index in "${container_indices_array[@]}"; do
+                container_index=$((container_index-1))
+                selected_containers+=("$pod:${containers[$container_index]}")
+            done
+        fi
+    done
 
-        read -p "Введите время для логов (например 30m, 1h): " since_time
-        log_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/log/$(date +%Y%m%d_%H%M%S)"
-        mkdir -p "$log_dir"
-        for container in "${selected_containers[@]}"; do
-            oc logs "$pod" -c "$container" -n "$namespace" --since="$since_time" > "$log_dir/${pod}_${container}.log"
-            color_text "green" "Логи сохранены в $log_dir/${pod}_${container}.log"
-        done
+    read -p "Введите время для логов (например 30m, 1h): " since_time
+    log_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/log/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$log_dir"
+    for container in "${selected_containers[@]}"; do
+        IFS=':' read -r pod container_name <<< "$container"
+        oc logs "$pod" -c "$container_name" -n "$namespace" --since="$since_time" > "$log_dir/${pod}_${container_name}.log"
+        color_text "green" "Логи сохранены в $log_dir/${pod}_${container_name}.log"
     done
 }
 
