@@ -72,7 +72,8 @@ get_all_namespaces() {
     for i in "${!namespaces[@]}"; do
         index=$((i+1))
         IFS=':' read -r cluster_url ns <<< "${namespaces[$i]}"
-        color_text "green" "$index) $ns (Кластер: $cluster_url)"
+        cluster_url_clean=$(echo "$cluster_url" | sed 's|https://||')
+        color_text "green" "$index) $ns (Кластер: $cluster_url_clean)"
     done
     read -p "Введите номер namespace для подключения или 'back' для возврата к выбору кластера: " ns_index
 
@@ -140,7 +141,7 @@ choose_action() {
                 1) export_logs "$cluster_url" "$namespace"; break ;;
                 2) download_configs "$cluster_url" "$namespace"; break ;;
                 3) restore_configs "$cluster_url" "$namespace"; break ;;
-                4) clear_namespace "$namespace"; break ;;
+                4) confirm_clear_namespace "$cluster_url" "$namespace"; break ;;
                 5) choose_cluster; break ;;
                 6) exit 0 ;;
                 *) color_text "red" "Неверный выбор." ;;
@@ -180,7 +181,7 @@ export_logs() {
             color_text "green" "$index) ${containers[$i]}"
         done
         read -p "Введите номера контейнеров через запятую или 'all' для выбора всех контейнеров в поде $pod: " container_indices
-        if [[ "$container_indices" == "all" || -z "$container_indices" ]]; then
+        if [[ "$container_indices" == "all" || -з "$container_indices" ]]; then
             for container in "${containers[@]}"; do
                 selected_containers+=("$pod:$container")
             done
@@ -193,14 +194,21 @@ export_logs() {
         fi
     done
 
-    read -p "Введите время для логов (например 30m, 1h): " since_time
+    read -p "Введите время для логов (например 30m, 1h или 'all' для всех логов): " since_time
     log_dir="$(echo "$cluster_url" | awk -F[/:] '{print $4}')/$namespace/log/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$log_dir"
     for container in "${selected_containers[@]}"; do
         IFS=':' read -r pod container_name <<< "$container"
         color_text "magenta" "Под: $(color_text "cyan" "$pod")"
-        oc logs "$pod" -c "$container_name" -n "$namespace" --since="$since_time" > "$log_dir/${pod}_${container_name}.txt"
-        color_text "green" "Логи ${container_name} сохранены в $log_dir/${pod}_${container_name}.txt"
+        if [[ "$since_time" == "all" ]]; then
+            log_file="$log_dir/${pod}_${container_name}.txt"
+            oc logs "$pod" -c "$container_name" -n "$namespace" > "$log_file"
+        else
+            log_file="$log_dir/${pod}_${container_name}.txt"
+            oc logs "$pod" -c "$container_name" -n "$namespace" --since="$since_time" > "$log_file"
+        fi
+        log_size=$(du -h "$log_file" | cut -f1)
+        color_text "green" "Логи ${container_name} сохранены в $log_file (${log_size})"
     done
 }
 
@@ -246,15 +254,29 @@ restore_configs() {
     backup_dir="${backups[$backup_index]}"
     for file in "$backup_dir"/*.yaml; do
         color_text "light_blue" "Восстановление $file..."
-        oc apply -f "$file" -n "$namespace"
+        oc apply --overwrite=true -f "$file" -n "$namespace" 2>/dev/null
     done
     color_text "green" "Конфигурации восстановлены из $backup_dir"
 }
 
+# Функция для подтверждения очистки namespace
+confirm_clear_namespace() {
+    cluster_url="$1"
+    namespace="$2"
+    color_text "red" "Уверены ли вы, что хотите очистить namespace $namespace в кластере $cluster_url? [yes/no]"
+    read -p "" confirm
+    if [[ "$confirm" == "yes" ]]; then
+        clear_namespace "$cluster_url" "$namespace"
+    else
+        color_text "green" "Очистка namespace отменена."
+    fi
+}
+
 # Функция для очистки namespace
 clear_namespace() {
-    namespace="$1"
-    color_text "yellow" "Очистка namespace $namespace..."
+    cluster_url="$1"
+    namespace="$2"
+    color_text "yellow" "Очистка namespace $namespace в кластере $cluster_url..."
     for resource in "${RESOURCES[@]}"; do
         oc delete "$resource" -n "$namespace" --all
     done
