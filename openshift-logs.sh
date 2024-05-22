@@ -68,15 +68,22 @@ login_to_cluster() {
     oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
     if [[ $? -eq 0 ]]; then
         token=$(oc whoami -t)
-        if grep -q "^$cluster_url=" "$CLUSTERS_FILE"; then
-            sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
-        else
-            echo "$cluster_url=$token" >> "$CLUSTERS_FILE"
-        fi
+        update_cluster_token "$cluster_url" "$token"
         color_text "green" "Успешная авторизация."
     else
         color_text "red" "Не удалось авторизоваться."
         exit 1
+    fi
+}
+
+# Функция для обновления токена в файле
+update_cluster_token() {
+    cluster_url="$1"
+    token="$2"
+    if grep -q "^$cluster_url=" "$CLUSTERS_FILE"; then
+        sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
+    else
+        echo "$cluster_url=$token" >> "$CLUSTERS_FILE"
     fi
 }
 
@@ -135,7 +142,7 @@ export_logs() {
     done
 
     for pod in "${selected_pods[@]}"; do
-        mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}')
+        mapfile -t containers < <(oc get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n')
         for i in "${!containers[@]}"; do
             index=$((i+1))
             color_text "green" "$index) ${containers[$i]}"
