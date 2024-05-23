@@ -42,11 +42,8 @@ login_to_cluster() {
 update_cluster_token() {
     cluster_url="$1"
     token="$2"
-    if grep -q "^$cluster_url=" "$CLUSTERS_FILE"; then
-        sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
-    else
-        echo "$cluster_url=$token" >> "$CLUSTERS_FILE"
-    fi
+    # Обновляем токен в существующей строке
+    sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
 }
 
 # Функция для выбора действия с namespace
