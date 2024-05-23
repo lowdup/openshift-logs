@@ -42,8 +42,11 @@ login_to_cluster() {
 update_cluster_token() {
     cluster_url="$1"
     token="$2"
-    # Обновляем токен в существующей строке
-    sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
+    awk -v url="$cluster_url" -v new_token="$token" -F= '
+    BEGIN {OFS=FS}
+    $1 == url {$2 = new_token}
+    {print}
+    ' "$CLUSTERS_FILE" > temp && mv temp "$CLUSTERS_FILE"
 }
 
 # Функция для выбора действия с namespace
