@@ -84,7 +84,7 @@ get_all_namespaces() {
     else
         ns_index=$((ns_index-1))
         IFS='=' read -r cluster_url namespace <<< "${namespaces[$ns_index]}"
-        choose_action "$cluster_url" "$namespace"
+        authorize_and_choose_action "$cluster_url" "$namespace"
     fi
 }
 
@@ -129,6 +129,25 @@ choose_namespace() {
     read -p "Введите номер проекта: " namespace_index
     namespace_index=$((namespace_index-1))
     namespace="${namespaces[$namespace_index]}"
+    choose_action "$cluster_url" "$namespace"
+}
+
+# Функция для авторизации и выбора действия с namespace
+authorize_and_choose_action() {
+    cluster_url="$1"
+    namespace="$2"
+    cluster_line=$(grep "$cluster_url" "$CLUSTERS_FILE")
+    IFS='=' read -r _ token <<< "$cluster_line"
+    if [[ -z "$token" ]]; then
+        color_text "light_blue" "Токен для $(color_text "cyan" "$cluster_url") не найден. Пожалуйста, авторизуйтесь."
+        login_to_cluster "$cluster_url"
+    else
+        oc login --token="$token" --server="$cluster_url" &>/dev/null
+        if [[ $? -ne 0 ]]; then
+            color_text "red" "Токен недействителен. Пожалуйста, авторизуйтесь."
+            login_to_cluster "$cluster_url"
+        fi
+    fi
     choose_action "$cluster_url" "$namespace"
 }
 
