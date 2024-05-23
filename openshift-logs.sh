@@ -57,33 +57,11 @@ choose_cluster() {
 get_all_namespaces() {
     color_text "light_blue" "Получение списка namespaces со всех кластеров..."
     namespaces=()
-    read -p "Введите логин: " username
-    read -sp "Введите пароль: " password
-    echo
     while IFS= read -r line; do
         IFS='=' read -r cluster_url token <<< "$line"
-        if [[ -z "$token" ]]; then
-            oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
-            if [[ $? -eq 0 ]]; then
-                token=$(oc whoami -t)
-                update_cluster_token "$cluster_url" "$token" "$line"
-            else
-                color_text "red" "Не удалось авторизоваться для $(color_text "cyan" "$cluster_url"). Пропуск..."
-                continue
-            fi
-        else
-            oc login --token="$token" --server="$cluster_url" &>/dev/null
-            if [[ $? -ne 0 ]]; then
-                color_text "red" "Токен недействителен для $(color_text "cyan" "$cluster_url"). Использование логина и пароля."
-                oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
-                if [[ $? -eq 0 ]]; then
-                    token=$(oc whoami -t)
-                    update_cluster_token "$cluster_url" "$token" "$line"
-                else
-                    color_text "red" "Не удалось авторизоваться для $(color_text "cyan" "$cluster_url"). Пропуск..."
-                    continue
-                fi
-            fi
+        if [[ -z "$token" || "$(oc login --token="$token" --server="$cluster_url" &>/dev/null; echo $?)" -ne 0 ]]; then
+            color_text "light_blue" "Токен для $(color_text "cyan" "$cluster_url") не найден или недействителен. Пожалуйста, авторизуйтесь."
+            login_to_cluster "$cluster_url"
         fi
 
         cluster_namespaces=$(oc projects -q)
@@ -113,18 +91,16 @@ get_all_namespaces() {
 # Функция для авторизации в кластере
 login_to_cluster() {
     cluster_url="$1"
-    cluster_index="$2"
     read -p "Введите логин: " username
     read -sp "Введите пароль: " password
     echo
     oc login --username="$username" --password="$password" --server="$cluster_url" &>/dev/null
     if [[ $? -eq 0 ]]; then
         token=$(oc whoami -t)
-        update_cluster_token "$cluster_url" "$token" "$cluster_index"
+        update_cluster_token "$cluster_url" "$token"
         color_text "green" "Успешная авторизация."
     else
         color_text "red" "Не удалось авторизоваться."
-        exit 1
     fi
 }
 
@@ -132,10 +108,9 @@ login_to_cluster() {
 update_cluster_token() {
     cluster_url="$1"
     token="$2"
-    cluster_line="$3"
     clusters=($(cat "$CLUSTERS_FILE"))
     for i in "${!clusters[@]}"; do
-        if [[ "${clusters[$i]}" == "$cluster_line" ]]; then
+        if [[ "${clusters[$i]}" == "$cluster_url"* ]]; then
             clusters[$i]="$cluster_url=$token"
         fi
     done
