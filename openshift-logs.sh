@@ -34,6 +34,7 @@ login_to_cluster() {
         color_text "green" "Успешная авторизация."
     else
         color_text "red" "Не удалось авторизоваться."
+        exit 1
     fi
 }
 
@@ -41,7 +42,11 @@ login_to_cluster() {
 update_cluster_token() {
     cluster_url="$1"
     token="$2"
-    sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
+    if grep -q "^$cluster_url=" "$CLUSTERS_FILE"; then
+        sed -i "s|^$cluster_url=.*|$cluster_url=$token|" "$CLUSTERS_FILE"
+    else
+        echo "$cluster_url=$token" >> "$CLUSTERS_FILE"
+    fi
 }
 
 # Функция для выбора действия с namespace
@@ -170,7 +175,7 @@ choose_cluster() {
         IFS='=' read -r cluster_url token <<< "$cluster"
         if [[ -z "$token" || "$(oc login --token="$token" --server="$cluster_url" &>/dev/null; echo $?)" -ne 0 ]]; then
             color_text "light_blue" "Токен для $(color_text "cyan" "$cluster_url") не найден или недействителен. Пожалуйста, авторизуйтесь."
-            login_to_cluster "$cluster_url" "$cluster_index"
+            login_to_cluster "$cluster_url"
         fi
         choose_namespace "$cluster_url"
     fi
